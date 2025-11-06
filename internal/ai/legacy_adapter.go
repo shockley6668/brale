@@ -73,7 +73,7 @@ func (e *LegacyEngineAdapter) Decide(ctx context.Context, input Context) (Decisi
         raw, err := p.Call(cctx, sys, usr)
         parsed := DecisionResult{}
         if err == nil {
-            if arr, ok := extractJSONArrayCompat(raw); ok {
+            if arr, ok := ExtractJSONArrayCompat(raw); ok {
                 var ds []Decision
                 if je := json.Unmarshal([]byte(arr), &ds); je == nil {
                     parsed.Decisions = ds
@@ -133,7 +133,7 @@ func (e *LegacyEngineAdapter) Decide(ctx context.Context, input Context) (Decisi
                 logger.Warnf("AI[%s] 无输出", o.ProviderID)
                 continue
             }
-            arr, start, ok := extractJSONArrayWithIndex(o.Raw)
+            arr, start, ok := ExtractJSONArrayWithIndex(o.Raw)
             if ok {
                 cot := strings.TrimSpace(o.Raw[:start])
                 if cot != "" {
@@ -235,46 +235,4 @@ func (e *LegacyEngineAdapter) buildUserSummary(ctx context.Context, candidates [
     b.WriteString("\n请先输出一段简短的【思维链】（最多3句，说明判断依据与步骤），然后换行仅输出 JSON 数组作为最终结果；数组中每项必须包含 symbol、action，并附带简短的 reasoning 字段。\n")
     b.WriteString("示例:\n思维链: 4h 供需区不明确，15m 未出现有效形态，MACD 未确认。\n[ {\"symbol\":\"BTCUSDT\",\"action\":\"hold\",\"reasoning\":\"未满足三步确认，暂不入场\"} ]\n")
     return b.String()
-}
-
-// extractJSONArrayCompat：提取首个 JSON 数组（与 SimpleJSONEngine 的逻辑一致，重复实现避免导出内部符号）
-func extractJSONArrayCompat(s string) (string, bool) {
-	start := strings.Index(s, "[")
-	if start == -1 {
-		return "", false
-	}
-	depth := 0
-	for i := start; i < len(s); i++ {
-		switch s[i] {
-		case '[':
-			depth++
-		case ']':
-			depth--
-			if depth == 0 {
-				return strings.TrimSpace(s[start : i+1]), true
-			}
-		}
-	}
-	return "", false
-}
-
-// extractJSONArrayWithIndex 提取首个 JSON 数组，并返回起始下标
-func extractJSONArrayWithIndex(s string) (string, int, bool) {
-    start := strings.Index(s, "[")
-    if start == -1 {
-        return "", -1, false
-    }
-    depth := 0
-    for i := start; i < len(s); i++ {
-        switch s[i] {
-        case '[':
-            depth++
-        case ']':
-            depth--
-            if depth == 0 {
-                return strings.TrimSpace(s[start : i+1]), start, true
-            }
-        }
-    }
-    return "", -1, false
 }

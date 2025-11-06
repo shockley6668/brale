@@ -8,40 +8,9 @@ import (
     "strings"
 )
 
-// 中文说明：
-// 多模型聚合器，用于整合多个模型输出。
-
-// ModelOutput 模型执行后的统一表示
-type ModelOutput struct {
-    ProviderID string
-    Raw        string
-    Parsed     DecisionResult
-    Err        error
-}
-
-// Aggregator 聚合接口
-type Aggregator interface {
-    Aggregate(ctx context.Context, outputs []ModelOutput) (ModelOutput, error)
-    Name() string
-}
-
-// FirstWinsAggregator 取第一个成功的输出
-type FirstWinsAggregator struct{}
-
-func (a FirstWinsAggregator) Name() string { return "first-wins" }
-
-func (a FirstWinsAggregator) Aggregate(ctx context.Context, outputs []ModelOutput) (ModelOutput, error) {
-    for _, o := range outputs {
-        if o.Err == nil && len(o.Parsed.Decisions) > 0 {
-            return o, nil
-        }
-    }
-    return ModelOutput{}, errors.New("无可用的模型输出")
-}
-
 // MetaAggregator：逐币种多数决（留权重，默认相等）。
 // 规则：
-// - 每个模型对同一 symbol 仅投一票（按 close > open > hold/wait 优先级取其“主”动作）
+// - 每个模型对同一 symbol 仅投一票（按 close > open > hold 优先级取其“主”动作）
 // - 汇总各模型对该 symbol 的票数（支持权重），多数者为最终动作；票数相等则输出 hold
 // - 若任意 symbol 存在分歧，则在结果中填充 MetaSummary 便于外层做 Telegram 推送
 type MetaAggregator struct{ Weights map[string]float64 }
@@ -54,20 +23,11 @@ func pri(action string) int {
         return 1
     case "open_long", "open_short":
         return 2
-    case "hold", "wait":
+    case "hold":
         return 3
     default:
         return 9
     }
-}
-
-// canonAction 将动作归一化：把 "wait" 视为 "hold"（二者同义，避免在 meta 聚合中制造分歧）
-func canonAction(a string) string {
-    a = strings.ToLower(strings.TrimSpace(a))
-    if a == "wait" {
-        return "hold"
-    }
-    return a
 }
 
 func (a MetaAggregator) Aggregate(ctx context.Context, outputs []ModelOutput) (ModelOutput, error) {
@@ -87,19 +47,15 @@ func (a MetaAggregator) Aggregate(ctx context.Context, outputs []ModelOutput) (M
         for _, d := range o.Parsed.Decisions {
             s := strings.TrimSpace(d.Symbol)
             if s == "" { continue }
-            d.Action = canonAction(d.Action)
+            d.Action = NormalizeAction(d.Action)
             if prev, ok := chosen[s]; !ok || pri(d.Action) < pri(prev.Action) {
                 chosen[s] = d
             }
         }
-        if len(chosen) == 0 {
-            continue
-        }
+        if len(chosen) == 0 { continue }
         w := 1.0
         if a.Weights != nil {
-            if v, ok := a.Weights[o.ProviderID]; ok && v > 0 {
-                w = v
-            }
+            if v, ok := a.Weights[o.ProviderID]; ok && v > 0 { w = v }
         }
         for sym, d := range chosen {
             if _, ok := votes[sym]; !ok { votes[sym] = map[string]float64{} }
@@ -118,9 +74,7 @@ func (a MetaAggregator) Aggregate(ctx context.Context, outputs []ModelOutput) (M
     for sym, am := range votes {
         if len(am) == 1 {
             // 一致
-            for act := range am {
-                decisions = append(decisions, Decision{Symbol: sym, Action: act})
-            }
+            for act := range am { decisions = append(decisions, Decision{Symbol: sym, Action: act}) }
             continue
         }
         anyDisagree = true
@@ -128,19 +82,9 @@ func (a MetaAggregator) Aggregate(ctx context.Context, outputs []ModelOutput) (M
         bestW := -1.0
         tie := false
         for act, w := range am {
-            if w > bestW {
-                bestW = w
-                bestA = act
-                tie = false
-            } else if w == bestW {
-                tie = true
-            }
+            if w > bestW { bestW = w; bestA = act; tie = false } else if w == bestW { tie = true }
         }
-        if tie {
-            decisions = append(decisions, Decision{Symbol: sym, Action: "hold"})
-        } else {
-            decisions = append(decisions, Decision{Symbol: sym, Action: bestA})
-        }
+        if tie { decisions = append(decisions, Decision{Symbol: sym, Action: "hold"}) } else { decisions = append(decisions, Decision{Symbol: sym, Action: bestA}) }
     }
 
     // 构造 MetaSummary（仅在出现分歧时）
@@ -178,3 +122,4 @@ func (a MetaAggregator) Aggregate(ctx context.Context, outputs []ModelOutput) (M
     res := DecisionResult{Decisions: decisions, MetaSummary: summary}
     return ModelOutput{ProviderID: "meta", Parsed: res}, nil
 }
+
