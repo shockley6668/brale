@@ -97,6 +97,129 @@
         </table>
       </div>
     </section>
+
+    <section>
+      <h2>模拟回测</h2>
+      <form id="runForm">
+        <div class="row">
+          <label>交易对 *</label>
+          <input type="text" id="runSymbol" placeholder="如 BTCUSDT" required />
+        </div>
+        <div class="row grid">
+          <div>
+            <label>持仓周期 *</label>
+            <select id="profile" required></select>
+          </div>
+          <div>
+            <label>执行周期 *</label>
+            <select id="executionTf" required></select>
+          </div>
+        </div>
+        <div class="row grid">
+          <div>
+            <label>起始时间 *</label>
+            <input type="datetime-local" id="runStart" required />
+          </div>
+          <div>
+            <label>结束时间 *</label>
+            <input type="datetime-local" id="runEnd" required />
+          </div>
+        </div>
+        <div class="row grid">
+          <div>
+            <label>初始资金 (USDT)</label>
+            <input type="number" id="initialBalance" value="10000" step="100" min="100" />
+          </div>
+          <div>
+            <label>手续费率</label>
+            <input type="number" id="feeRate" value="0.0004" step="0.0001" min="0" />
+          </div>
+        </div>
+        <button type="submit">启动模拟</button>
+      </form>
+      <div id="runMessage" class="message"></div>
+
+      <div class="section-head">
+        <h3>回测记录</h3>
+        <button id="refreshRunsList">刷新</button>
+      </div>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>交易对 / 周期</th>
+              <th>状态</th>
+              <th>PnL</th>
+              <th>胜率</th>
+              <th>更新时间</th>
+            </tr>
+          </thead>
+          <tbody id="runsBody">
+            <tr><td colspan="6" class="muted">暂无记录</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card" id="runDetailCard">
+        <h3>回测详情</h3>
+        <div id="runSummary" class="muted">选择一条回测记录查看详情</div>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>开仓时间</th>
+                <th>方向</th>
+                <th>入场</th>
+              <th>离场</th>
+              <th>数量</th>
+              <th>PnL</th>
+              <th>PnL%</th>
+              <th>止盈</th>
+              <th>止损</th>
+              <th>RR</th>
+            </tr>
+          </thead>
+          <tbody id="positionsBody">
+              <tr><td colspan="10" class="muted">暂无持仓记录</td></tr>
+          </tbody>
+        </table>
+      </div>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>Equity</th>
+                <th>Balance</th>
+                <th>回撤</th>
+                <th>敞口</th>
+              </tr>
+            </thead>
+            <tbody id="snapshotsBody">
+              <tr><td colspan="5" class="muted">暂无快照</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>周期</th>
+                <th>Provider/阶段</th>
+                <th>决策</th>
+                <th>状态</th>
+                <th>输入 / 输出</th>
+              </tr>
+            </thead>
+            <tbody id="logsBody">
+              <tr><td colspan="6" class="muted">暂无 AI 记录</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
   </main>
 
   <footer>

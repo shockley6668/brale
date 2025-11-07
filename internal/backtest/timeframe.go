@@ -15,7 +15,9 @@ type Timeframe struct {
 }
 
 var supportedTimeframes = map[string]Timeframe{
+	"5m":  {Key: "5m", Duration: 5 * time.Minute, SourceInterval: "5m"},
 	"15m": {Key: "15m", Duration: 15 * time.Minute, SourceInterval: "15m"},
+	"30m": {Key: "30m", Duration: 30 * time.Minute, SourceInterval: "30m"},
 	"1h":  {Key: "1h", Duration: time.Hour, SourceInterval: "1h"},
 	"4h":  {Key: "4h", Duration: 4 * time.Hour, SourceInterval: "4h"},
 	"1d":  {Key: "1d", Duration: 24 * time.Hour, SourceInterval: "1d"},

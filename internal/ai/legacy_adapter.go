@@ -22,6 +22,7 @@ import (
 type LegacyEngineAdapter struct {
 	Providers []ModelProvider // 可配置多个模型
 	Agg       Aggregator      // 聚合策略（默认 first-wins）
+	Observer  DecisionObserver
 
 	PromptMgr      *prompt.Manager // 提示词管理器
 	SystemTemplate string          // 使用的系统模板名
@@ -50,6 +51,19 @@ type LegacyEngineAdapter struct {
 	TimeoutSeconds int
 }
 
+// DecisionObserver 在每次模型聚合后回调，便于外部记录输入/输出。
+type DecisionObserver interface {
+	AfterDecide(ctx context.Context, trace DecisionTrace)
+}
+
+// DecisionTrace 描述一次完整调用的材料与结果。
+type DecisionTrace struct {
+	SystemPrompt string
+	UserPrompt   string
+	Outputs      []ModelOutput
+	Best         ModelOutput
+}
+
 func (e *LegacyEngineAdapter) Name() string {
 	if e.Name_ != "" {
 		return e.Name_
@@ -59,8 +73,7 @@ func (e *LegacyEngineAdapter) Name() string {
 
 // Decide 构建 System/User 提示词 → 调用多个模型 → 聚合 → 解析 JSON 决策
 func (e *LegacyEngineAdapter) Decide(ctx context.Context, input Context) (DecisionResult, error) {
-	sys := e.loadSystem()
-	usr := e.buildUserSummary(ctx, input.Candidates)
+	sys, usr := e.ComposePrompts(ctx, input)
 
 	// 调用所有已启用模型（可并行），带超时控制
 	outs := make([]ModelOutput, 0, len(e.Providers))
@@ -177,7 +190,24 @@ func (e *LegacyEngineAdapter) Decide(ctx context.Context, input Context) (Decisi
 	if err != nil {
 		return DecisionResult{}, err
 	}
-	return best.Parsed, nil
+	result := best.Parsed
+	result.Decisions = normalizeAndAlignDecisions(result.Decisions, input.Positions)
+	best.Parsed.Decisions = result.Decisions
+
+	if e.Observer != nil {
+		e.Observer.AfterDecide(ctx, DecisionTrace{
+			SystemPrompt: sys,
+			UserPrompt:   usr,
+			Outputs:      cloneOutputs(outs),
+			Best:         best,
+		})
+	}
+	return result, nil
+}
+
+// ComposePrompts 返回当前配置下的 System/User 提示词。
+func (e *LegacyEngineAdapter) ComposePrompts(ctx context.Context, input Context) (string, string) {
+	return e.loadSystem(), e.buildUserSummary(ctx, input)
 }
 
 // loadSystem 从 PromptManager 读取系统模板
@@ -191,8 +221,8 @@ func (e *LegacyEngineAdapter) loadSystem() string {
 	return "你是专业的加密货币交易AI。请根据市场数据与风险控制做出决策。\n"
 }
 
-// buildUserSummary 将候选币种的最后一根 K 线收盘价（按配置周期）汇总到文案中
-func (e *LegacyEngineAdapter) buildUserSummary(ctx context.Context, candidates []string) string {
+// buildUserSummary 将候选币种与当前仓位的摘要组装为 User 提示词
+func (e *LegacyEngineAdapter) buildUserSummary(ctx context.Context, input Context) string {
 	var b strings.Builder
 	horizonName := e.HorizonName
 	if horizonName == "" {
@@ -250,7 +280,7 @@ func (e *LegacyEngineAdapter) buildUserSummary(ctx context.Context, candidates [
 	if len(intervals) == 0 {
 		intervals = profile.AllTimeframes()
 	}
-	for _, sym := range candidates {
+	for _, sym := range input.Candidates {
 		b.WriteString(sym)
 		b.WriteString(": ")
 		first := true
@@ -329,7 +359,36 @@ func (e *LegacyEngineAdapter) buildUserSummary(ctx context.Context, candidates [
 		}
 		b.WriteString("\n")
 	}
-	b.WriteString("\n请先输出一段简短的【思维链】（最多3句，说明判断依据与步骤），然后换行仅输出 JSON 数组作为最终结果；数组中每项必须包含 symbol、action，并附带简短的 reasoning 字段。\n")
+	if len(input.Positions) > 0 {
+		b.WriteString("\n## 当前持仓\n")
+		for _, pos := range input.Positions {
+			upnl := fmt.Sprintf("未实现PnL=%.2f", pos.UnrealizedPn)
+			if pos.UnrealizedPnPct != 0 {
+				upnl = fmt.Sprintf("未实现PnL=%.2f (%.2f%%)", pos.UnrealizedPn, pos.UnrealizedPnPct*100)
+			}
+			line := fmt.Sprintf("- %s %s 入场=%.4f 数量=%.4f RR=%.2f %s",
+				pos.Symbol, strings.ToUpper(pos.Side), pos.EntryPrice, pos.Quantity, pos.RR, upnl)
+			if pos.TakeProfit > 0 {
+				line += fmt.Sprintf(" TP=%.4f", pos.TakeProfit)
+			}
+			if pos.StopLoss > 0 {
+				line += fmt.Sprintf(" SL=%.4f", pos.StopLoss)
+			}
+			b.WriteString(line + "\n")
+		}
+		b.WriteString("请结合上述仓位判断是否需要平仓、加仓或调整计划。\n")
+	}
+
+	b.WriteString("\n请先输出一段简短的【思维链】（最多3句，说明判断依据与步骤），然后换行仅输出 JSON 数组作为最终结果；数组中每项必须包含 symbol、action，并附带简短的 reasoning 字段。仅当已有对应方向仓位且需要部分减仓/止盈时，才在 JSON 中提供 close_ratio（0-1，表示释放仓位比例）或 position_size_usd；无仓位时不要返回 close_ratio。当 action 为 open_long/open_short 时，务必返回 take_profit 与 stop_loss 字段（使用绝对价格，浮点数）。当 action 为 adjust_stop_loss 时，必须返回新的 stop_loss 价格，否则视为无效。\n")
 	b.WriteString("示例:\n思维链: 4h 供需区不明确，15m 未出现有效形态，MACD 未确认。\n[ {\"symbol\":\"BTCUSDT\",\"action\":\"hold\",\"reasoning\":\"未满足三步确认，暂不入场\"} ]\n")
 	return b.String()
+}
+
+func cloneOutputs(src []ModelOutput) []ModelOutput {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make([]ModelOutput, len(src))
+	copy(dst, src)
+	return dst
 }

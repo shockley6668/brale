@@ -17,13 +17,17 @@ import (
 type HTTPServer struct {
 	addr      string
 	svc       *Service
+	sim       *Simulator
+	results   *ResultStore
 	router    *gin.Engine
 	indexHTML []byte
 }
 
 type HTTPConfig struct {
-	Addr string
-	Svc  *Service
+	Addr      string
+	Svc       *Service
+	Simulator *Simulator
+	Results   *ResultStore
 }
 
 func NewHTTPServer(cfg HTTPConfig) (*HTTPServer, error) {
@@ -50,6 +54,8 @@ func NewHTTPServer(cfg HTTPConfig) (*HTTPServer, error) {
 	s := &HTTPServer{
 		addr:      cfg.Addr,
 		svc:       cfg.Svc,
+		sim:       cfg.Simulator,
+		results:   cfg.Results,
 		router:    router,
 		indexHTML: indexHTML,
 	}
@@ -66,6 +72,13 @@ func (s *HTTPServer) registerRoutes() {
 	api.GET("/data", s.handleManifest)
 	api.GET("/candles", s.handleCandles)
 	api.GET("/candles/all", s.handleAllCandles)
+	api.POST("/runs", s.handleRunStart)
+	api.GET("/runs", s.handleRunList)
+	api.GET("/runs/:id", s.handleRunDetail)
+	api.GET("/runs/:id/orders", s.handleRunOrders)
+	api.GET("/runs/:id/positions", s.handleRunPositions)
+	api.GET("/runs/:id/snapshots", s.handleRunSnapshots)
+	api.GET("/runs/:id/logs", s.handleRunLogs)
 }
 
 func (s *HTTPServer) handleIndex(c *gin.Context) {
@@ -163,6 +176,107 @@ func (s *HTTPServer) handleAllCandles(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"candles": data})
+}
+
+func (s *HTTPServer) handleRunStart(c *gin.Context) {
+	if s.sim == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "模拟器未启用"})
+		return
+	}
+	var req RunRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	run, err := s.sim.StartRun(req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"run": run})
+}
+
+func (s *HTTPServer) handleRunList(c *gin.Context) {
+	if s.results == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "结果存储未启用"})
+		return
+	}
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	runs, err := s.results.ListRuns(c.Request.Context(), limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"runs": runs})
+}
+
+func (s *HTTPServer) handleRunDetail(c *gin.Context) {
+	if s.results == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "结果存储未启用"})
+		return
+	}
+	run, err := s.results.GetRun(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"run": run})
+}
+
+func (s *HTTPServer) handleRunOrders(c *gin.Context) {
+	if s.results == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "结果存储未启用"})
+		return
+	}
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "200"))
+	orders, err := s.results.ListOrders(c.Request.Context(), c.Param("id"), limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"orders": orders})
+}
+
+func (s *HTTPServer) handleRunPositions(c *gin.Context) {
+	if s.results == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "结果存储未启用"})
+		return
+	}
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "200"))
+	positions, err := s.results.ListPositions(c.Request.Context(), c.Param("id"), limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"positions": positions})
+}
+
+func (s *HTTPServer) handleRunSnapshots(c *gin.Context) {
+	if s.results == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "结果存储未启用"})
+		return
+	}
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "400"))
+	snaps, err := s.results.ListSnapshots(c.Request.Context(), c.Param("id"), limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"snapshots": snaps})
+}
+
+func (s *HTTPServer) handleRunLogs(c *gin.Context) {
+	if s.results == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "结果存储未启用"})
+		return
+	}
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "200"))
+	logs, err := s.results.ListRunLogs(c.Request.Context(), c.Param("id"), limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"logs": logs})
 }
 
 // Start 启动 HTTP 服务，阻塞直到 ctx 取消或出现错误。

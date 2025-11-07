@@ -103,6 +103,28 @@ type HorizonIndicators struct {
 	RSI RSIConfig `toml:"rsi"`
 }
 
+// LookbackBars 返回指标所需的最小历史条数。
+func (h HorizonIndicators) LookbackBars() int {
+	max := h.EMA.Slow
+	if h.EMA.Mid > max {
+		max = h.EMA.Mid
+	}
+	if h.EMA.Fast > max {
+		max = h.EMA.Fast
+	}
+	if p := h.RSI.Period + 1; p > max {
+		max = p
+	}
+	// MACD 需要至少 26
+	if max < 26 {
+		max = 26
+	}
+	if max <= 0 {
+		max = 50
+	}
+	return max
+}
+
 type EMAConfig struct {
 	Fast int `toml:"fast"`
 	Mid  int `toml:"mid"`
@@ -135,6 +157,23 @@ func (p HorizonProfile) AllTimeframes() []string {
 	add(p.EntryTimeframes)
 	add(p.ConfirmTimeframes)
 	add(p.BackgroundTimeframes)
+	return out
+}
+
+// LookbackMap 返回每个时间段所需的最小 K 线条数。
+func (p HorizonProfile) LookbackMap(buffer int) map[string]int {
+	if buffer < 0 {
+		buffer = 0
+	}
+	base := p.Indicators.LookbackBars()
+	req := base + buffer
+	if req <= 0 {
+		req = 50
+	}
+	out := make(map[string]int)
+	for _, tf := range p.AllTimeframes() {
+		out[strings.ToLower(tf)] = req
+	}
 	return out
 }
 
@@ -256,6 +295,16 @@ func applyDefaults(c *Config) {
 	derivedIntervals := activeProfile.AllTimeframes()
 	if len(derivedIntervals) == 0 {
 		derivedIntervals = []string{"5m"}
+	}
+	lookbacks := activeProfile.LookbackMap(20)
+	maxLookback := 0
+	for _, bars := range lookbacks {
+		if bars > maxLookback {
+			maxLookback = bars
+		}
+	}
+	if c.Kline.MaxCached < maxLookback+50 {
+		c.Kline.MaxCached = maxLookback + 50
 	}
 	if len(c.Kline.Periods) == 0 {
 		c.Kline.Periods = append([]string(nil), derivedIntervals...)

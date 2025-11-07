@@ -8,7 +8,8 @@ import "fmt"
 // - 开仓（open_*）必须给出必要参数且>0
 
 var validActions = map[string]bool{
-	"open_long": true, "open_short": true, "close_long": true, "close_short": true, "hold": true, "wait": true,
+	"open_long": true, "open_short": true, "close_long": true, "close_short": true,
+	"hold": true, "wait": true, "adjust_stop_loss": true,
 }
 
 func ValidateAll(ds []Decision) error {
@@ -24,7 +25,8 @@ func Validate(d *Decision) error {
 	if !validActions[d.Action] {
 		return fmt.Errorf("非法 action: %s", d.Action)
 	}
-	if d.Action == "open_long" || d.Action == "open_short" {
+	switch d.Action {
+	case "open_long", "open_short":
 		if d.Leverage <= 0 {
 			return fmt.Errorf("开仓需提供 leverage>0")
 		}
@@ -36,6 +38,10 @@ func Validate(d *Decision) error {
 		}
 		if d.Confidence < 0 || d.Confidence > 100 {
 			return fmt.Errorf("confidence 范围0-100")
+		}
+	case "adjust_stop_loss":
+		if d.StopLoss <= 0 {
+			return fmt.Errorf("调整止损需提供 stop_loss>0")
 		}
 	}
 	return nil

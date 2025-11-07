@@ -26,13 +26,16 @@ type App struct {
 	engine  ai.Decider
 	tg      *notify.Telegram
 
-	btStore  *backtest.Store
-	btSvc    *backtest.Service
-	btServer *backtest.HTTPServer
+	btStore   *backtest.Store
+	btSvc     *backtest.Service
+	btResults *backtest.ResultStore
+	btSim     *backtest.Simulator
+	btServer  *backtest.HTTPServer
 
 	symbols     []string
 	horizon     brcfg.HorizonProfile
 	hIntervals  []string
+	lookbacks   map[string]int
 	horizonName string
 	hSummary    string
 
@@ -91,8 +94,19 @@ func NewApp(cfg *brcfg.Config) (*App, error) {
 	updater := brmarket.NewWSUpdater(ks, cfg.Kline.MaxCached)
 
 	// 预热
+	lookbacks := horizon.LookbackMap(20)
 	preheater := brmarket.NewPreheater(ks, cfg.Kline.MaxCached)
+	preheater.Warmup(ctx, syms, lookbacks)
 	preheater.Preheat(ctx, syms, hIntervals, cfg.Kline.MaxCached)
+	logger.Infof("✓ Warmup 完成，最小条数=%v", lookbacks)
+	var warmupNotifier *notify.Telegram
+	if cfg.Notify.Telegram.Enabled {
+		warmupNotifier = notify.NewTelegram(cfg.Notify.Telegram.BotToken, cfg.Notify.Telegram.ChatID)
+	}
+	if warmupNotifier != nil {
+		msg := fmt.Sprintf("*Warmup 完成*\n```\n%v\n```", lookbacks)
+		_ = warmupNotifier.SendText(msg)
+	}
 
 	// 模型 Providers
 	var modelCfgs []ai.ModelCfg
@@ -143,13 +157,20 @@ func NewApp(cfg *brcfg.Config) (*App, error) {
 	}
 
 	var btStore *backtest.Store
+	var btResults *backtest.ResultStore
 	var btSvc *backtest.Service
+	var btSim *backtest.Simulator
 	var btHTTP *backtest.HTTPServer
 	if cfg.Backtest.Enabled {
 		var err error
 		btStore, err = backtest.NewStore(cfg.Backtest.DataDir)
 		if err != nil {
 			return nil, fmt.Errorf("初始化回测存储失败: %w", err)
+		}
+		btResults, err = backtest.NewResultStore(cfg.Backtest.DataDir)
+		if err != nil {
+			btStore.Close()
+			return nil, fmt.Errorf("初始化回测结果库失败: %w", err)
 		}
 		sources := map[string]backtest.CandleSource{
 			"binance": backtest.NewBinanceSource(""),
@@ -163,11 +184,42 @@ func NewApp(cfg *brcfg.Config) (*App, error) {
 			MaxConcurrent:   cfg.Backtest.MaxConcurrent,
 		})
 		if err != nil {
+			btResults.Close()
 			btStore.Close()
 			return nil, fmt.Errorf("初始化回测服务失败: %w", err)
 		}
-		btHTTP, err = backtest.NewHTTPServer(backtest.HTTPConfig{Addr: cfg.Backtest.HTTPAddr, Svc: btSvc})
+		simFactory := &backtest.AIProxyFactory{
+			Prompt:         pm,
+			SystemTemplate: cfg.Prompt.SystemTemplate,
+			Models:         modelCfgs,
+			Aggregator:     aggregator,
+			Parallel:       true,
+			TimeoutSeconds: cfg.MCP.TimeoutSeconds,
+		}
+		btSim, err = backtest.NewSimulator(backtest.SimulatorConfig{
+			CandleStore:    btStore,
+			ResultStore:    btResults,
+			Fetcher:        btSvc,
+			Profiles:       cfg.AI.HoldingProfiles,
+			Lookbacks:      lookbacks,
+			DefaultProfile: cfg.AI.ActiveHorizon,
+			Strategy:       simFactory,
+			Notifier:       tg,
+			MaxConcurrent:  cfg.Backtest.MaxConcurrent,
+		})
 		if err != nil {
+			btResults.Close()
+			btStore.Close()
+			return nil, fmt.Errorf("初始化回测模拟器失败: %w", err)
+		}
+		btHTTP, err = backtest.NewHTTPServer(backtest.HTTPConfig{
+			Addr:      cfg.Backtest.HTTPAddr,
+			Svc:       btSvc,
+			Simulator: btSim,
+			Results:   btResults,
+		})
+		if err != nil {
+			btResults.Close()
 			btStore.Close()
 			return nil, fmt.Errorf("初始化回测 HTTP 失败: %w", err)
 		}
@@ -184,11 +236,14 @@ func NewApp(cfg *brcfg.Config) (*App, error) {
 		symbols:     syms,
 		horizon:     horizon,
 		hIntervals:  append([]string(nil), hIntervals...),
+		lookbacks:   lookbacks,
 		horizonName: cfg.AI.ActiveHorizon,
 		hSummary:    hSummary,
 		lastOpen:    map[string]time.Time{},
 		btStore:     btStore,
 		btSvc:       btSvc,
+		btResults:   btResults,
+		btSim:       btSim,
 		btServer:    btHTTP,
 	}, nil
 }
@@ -201,8 +256,14 @@ func (a *App) Run(ctx context.Context) error {
 	if a.btStore != nil {
 		defer a.btStore.Close()
 	}
+	if a.btResults != nil {
+		defer a.btResults.Close()
+	}
 	if a.btSvc != nil {
 		a.btSvc.SetContext(ctx)
+	}
+	if a.btSim != nil {
+		a.btSim.SetContext(ctx)
 	}
 	if a.btServer != nil {
 		go func() {

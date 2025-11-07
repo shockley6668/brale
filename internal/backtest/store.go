@@ -310,3 +310,35 @@ func (s *Store) ListAllCandles(ctx context.Context, symbol, timeframe string) ([
 	}
 	return list, rows.Err()
 }
+
+// RangeCandles 返回 start~end 范围内的全部 K 线（开盘时间闭区间）。
+func (s *Store) RangeCandles(ctx context.Context, symbol, timeframe string, start, end int64) ([]Candle, error) {
+	db, _, err := s.db(symbol, timeframe)
+	if err != nil {
+		return nil, err
+	}
+	if start > 0 && end > 0 && end < start {
+		start, end = end, start
+	}
+	if start <= 0 || end <= 0 {
+		return nil, fmt.Errorf("start/end 需 > 0")
+	}
+	rows, err := db.QueryContext(ctx, `
+		SELECT open_time, close_time, open, high, low, close, volume, trades
+		FROM candles
+		WHERE open_time BETWEEN ? AND ?
+		ORDER BY open_time ASC`, start, end)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var list []Candle
+	for rows.Next() {
+		var c Candle
+		if err := rows.Scan(&c.OpenTime, &c.CloseTime, &c.Open, &c.High, &c.Low, &c.Close, &c.Volume, &c.Trades); err != nil {
+			return nil, err
+		}
+		list = append(list, c)
+	}
+	return list, rows.Err()
+}

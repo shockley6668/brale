@@ -9,6 +9,7 @@ type Decision struct {
 	Action          string  `json:"action"`             // open_long/open_short/close_long/close_short/hold/wait
 	Leverage        int     `json:"leverage,omitempty"` // 杠杆（仅开仓）
 	PositionSizeUSD float64 `json:"position_size_usd,omitempty"`
+	CloseRatio      float64 `json:"close_ratio,omitempty"`
 	StopLoss        float64 `json:"stop_loss,omitempty"`
 	TakeProfit      float64 `json:"take_profit,omitempty"`
 	Confidence      int     `json:"confidence,omitempty"`
@@ -17,9 +18,9 @@ type Decision struct {
 
 // DecisionResult AI 决策输出（可包含多币种）
 type DecisionResult struct {
-    Decisions []Decision
-    RawOutput string // 原始模型完整输出（便于调试/提取思维链）
-    RawJSON   string // 提取到的 JSON 决策数组文本
-    // MetaSummary: 当使用 meta 聚合时，记录各模型投票与理由的汇总文本（用于通知）
-    MetaSummary string
+	Decisions []Decision
+	RawOutput string // 原始模型完整输出（便于调试/提取思维链）
+	RawJSON   string // 提取到的 JSON 决策数组文本
+	// MetaSummary: 当使用 meta 聚合时，记录各模型投票与理由的汇总文本（用于通知）
+	MetaSummary string
 }

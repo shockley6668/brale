@@ -14,10 +14,12 @@ func OrderAndDedup(ds []Decision) []Decision {
 		switch a {
 		case "close_long", "close_short":
 			return 1
-		case "open_long", "open_short":
+		case "adjust_stop_loss":
 			return 2
-		case "hold", "wait":
+		case "open_long", "open_short":
 			return 3
+		case "hold", "wait":
+			return 4
 		default:
 			return 9
 		}

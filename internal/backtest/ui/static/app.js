@@ -1,10 +1,21 @@
 const TF_OPTIONS = ["15m", "1h", "4h", "1d", "3d", "7d"];
+const PROFILE_OPTIONS = ["one_hour", "four_hour", "one_day"];
+let currentRunId = "";
 
 function fillTimeframes(select) {
   TF_OPTIONS.forEach((tf) => {
     const option = document.createElement("option");
     option.value = tf;
     option.textContent = tf;
+    select.appendChild(option);
+  });
+}
+
+function fillProfiles(select) {
+  PROFILE_OPTIONS.forEach((profile) => {
+    const option = document.createElement("option");
+    option.value = profile;
+    option.textContent = profile;
     select.appendChild(option);
   });
 }
@@ -19,6 +30,20 @@ function formatTs(ms) {
   if (!ms) return "-";
   const date = new Date(ms);
   return date.toLocaleString();
+}
+
+function escapeHTML(str = "") {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function previewText(str = "", max = 80) {
+  if (!str) return "-";
+  return str.length > max ? `${str.slice(0, max)}…` : str;
 }
 
 function toLocalInput(date) {
@@ -39,6 +64,213 @@ async function safeFetch(url, options = {}) {
 function setMessage(el, text, type = "") {
   el.textContent = text;
   el.className = `message ${type}`;
+}
+
+function formatPercent(val) {
+  if (typeof val !== "number" || Number.isNaN(val)) return "-";
+  return (val * 100).toFixed(2) + "%";
+}
+
+function formatNumber(val, digits = 2) {
+  if (typeof val !== "number" || Number.isNaN(val)) return "-";
+  return val.toFixed(digits);
+}
+
+function statusText(run) {
+  let text = run.status || "-";
+  if (run.message) {
+    text += `<br/><small>${run.message}</small>`;
+  }
+  return text;
+}
+
+function updateRunsTable(runs) {
+  const body = document.getElementById("runsBody");
+  body.innerHTML = "";
+  if (!runs.length) {
+    const row = document.createElement("tr");
+    row.innerHTML = `<td colspan="6" class="muted">暂无记录</td>`;
+    body.appendChild(row);
+    return;
+  }
+  runs.forEach((run) => {
+    const row = document.createElement("tr");
+    if (run.id === currentRunId) {
+      row.classList.add("selected");
+    }
+    const profit = typeof run.profit === "number" ? formatNumber(run.profit, 2) : "-";
+    const winRate =
+      typeof run.win_rate === "number"
+        ? formatPercent(run.win_rate)
+        : run.stats
+        ? formatPercent(run.stats.win_rate)
+        : "-";
+    const updated = run.updated_at ? formatTs(Date.parse(run.updated_at)) : "-";
+    row.innerHTML = `
+      <td>${run.id.slice(0, 8)}…</td>
+      <td>${run.symbol}/${run.profile}</td>
+      <td>${statusText(run)}</td>
+      <td>${profit}</td>
+      <td>${winRate}</td>
+      <td>${updated}</td>
+    `;
+    row.addEventListener("click", () => loadRunDetail(run.id));
+    body.appendChild(row);
+  });
+}
+
+function showRunSummary(run) {
+  const summary = document.getElementById("runSummary");
+  currentRunId = run.id;
+  const stats = run.stats || {};
+  summary.innerHTML = `
+    <p><strong>ID</strong>: ${run.id}</p>
+    <p><strong>交易对</strong>: ${run.symbol} (${run.profile})</p>
+    <p><strong>时间</strong>: ${formatTs(run.start_ts)} → ${formatTs(run.end_ts)}</p>
+    <p><strong>资金</strong>: 初始 ${formatNumber(run.initial_balance || 0, 2)} · 结束 ${formatNumber(run.final_balance || stats.final_balance || 0, 2)}</p>
+    <p><strong>PnL</strong>: ${formatNumber(run.profit ?? stats.profit ?? 0, 2)} (${formatPercent(run.return_pct ?? stats.return_pct ?? 0)})</p>
+    <p><strong>胜率</strong>: ${formatPercent(run.win_rate ?? stats.win_rate ?? 0)} · <strong>最大回撤</strong>: ${formatPercent(run.max_drawdown_pct ?? stats.max_drawdown_pct ?? 0)}</p>
+    ${run.message ? `<p><strong>进度</strong>: ${run.message}</p>` : ""}
+  `;
+}
+
+function updatePositionsTable(list) {
+  const body = document.getElementById("positionsBody");
+  body.innerHTML = "";
+  if (!list.length) {
+    const row = document.createElement("tr");
+    row.innerHTML = `<td colspan="10" class="muted">暂无持仓记录</td>`;
+    body.appendChild(row);
+    return;
+  }
+  list.forEach((pos) => {
+    const row = document.createElement("tr");
+    const tp = pos.take_profit ? formatNumber(pos.take_profit, 4) : "-";
+    const sl = pos.stop_loss ? formatNumber(pos.stop_loss, 4) : "-";
+    const rr = pos.expected_rr ? formatNumber(pos.expected_rr, 2) : "-";
+    row.innerHTML = `
+      <td>${pos.opened_at ? formatTs(Date.parse(pos.opened_at)) : "-"}</td>
+      <td>${pos.side}</td>
+      <td>${formatNumber(pos.entry_price || 0, 4)}</td>
+      <td>${formatNumber(pos.exit_price || 0, 4)}</td>
+      <td>${formatNumber(pos.quantity || 0, 4)}</td>
+      <td>${formatNumber(pos.pnl || 0, 2)}</td>
+      <td>${formatPercent(pos.pnl_pct || 0)}</td>
+      <td>${tp}</td>
+      <td>${sl}</td>
+      <td>${rr}</td>
+    `;
+    body.appendChild(row);
+  });
+}
+
+function updateSnapshotsTable(list) {
+  const body = document.getElementById("snapshotsBody");
+  body.innerHTML = "";
+  if (!list.length) {
+    const row = document.createElement("tr");
+    row.innerHTML = `<td colspan="5" class="muted">暂无快照</td>`;
+    body.appendChild(row);
+    return;
+  }
+  list.slice(-200).forEach((snap) => {
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td>${formatTs(snap.ts)}</td>
+      <td>${formatNumber(snap.equity || 0, 2)}</td>
+      <td>${formatNumber(snap.balance || 0, 2)}</td>
+      <td>${formatPercent(snap.drawdown || 0)}</td>
+      <td>${formatPercent(snap.exposure || 0)}</td>
+    `;
+    body.appendChild(row);
+  });
+}
+
+function summarizeDecisions(decisions = []) {
+  if (!decisions.length) {
+    return "无";
+  }
+  return decisions
+    .map((d) => `${d.symbol || ""} ${d.action || ""}`.trim())
+    .join("; ");
+}
+
+function updateLogsTable(list) {
+  const body = document.getElementById("logsBody");
+  body.innerHTML = "";
+  if (!list.length) {
+    const row = document.createElement("tr");
+    row.innerHTML = `<td colspan="6" class="muted">暂无 AI 记录</td>`;
+    body.appendChild(row);
+    return;
+  }
+  list.forEach((log) => {
+    const row = document.createElement("tr");
+    const provider = `${log.provider_id || "-"} / ${log.stage || "-"}`;
+    const status =
+      log.error && log.error.length
+        ? `❗ ${escapeHTML(previewText(log.error, 80))}`
+        : "OK";
+    const meta =
+      log.meta_summary && log.meta_summary.length
+        ? `<br/><small>${escapeHTML(previewText(log.meta_summary, 120))}</small>`
+        : "";
+    const note =
+      log.note && log.note.length
+        ? `<br/><small>${escapeHTML(previewText(log.note, 80))}</small>`
+        : "";
+    const inputDetails = `
+      <details>
+        <summary>查看</summary>
+        <div class="prompt-block">
+          <strong>System</strong>
+          <pre>${escapeHTML(log.system_prompt || "-")}</pre>
+        </div>
+        <div class="prompt-block">
+          <strong>User</strong>
+          <pre>${escapeHTML(log.user_prompt || "-")}</pre>
+        </div>
+        <div class="prompt-block">
+          <strong>Raw</strong>
+          <pre>${escapeHTML(log.raw_output || log.raw_json || "-")}</pre>
+        </div>
+      </details>
+    `;
+    row.innerHTML = `
+      <td>${formatTs(log.candle_ts)}</td>
+      <td>${log.timeframe}</td>
+      <td>${provider}</td>
+      <td>${summarizeDecisions(log.decisions)}</td>
+      <td>${status}${meta}${note}</td>
+      <td>${inputDetails}</td>
+    `;
+    body.appendChild(row);
+  });
+}
+
+async function refreshRunsList() {
+  try {
+    const data = await safeFetch("/api/backtest/runs");
+    updateRunsTable(data.runs || []);
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+async function loadRunDetail(runId) {
+  try {
+    const detail = await safeFetch(`/api/backtest/runs/${runId}`);
+    showRunSummary(detail.run);
+    const positions = await safeFetch(`/api/backtest/runs/${runId}/positions?limit=200`);
+    updatePositionsTable(positions.positions || []);
+    const snaps = await safeFetch(`/api/backtest/runs/${runId}/snapshots?limit=400`);
+    updateSnapshotsTable(snaps.snapshots || []);
+    const logs = await safeFetch(`/api/backtest/runs/${runId}/logs?limit=200`);
+    updateLogsTable(logs.logs || []);
+    refreshRunsList();
+  } catch (err) {
+    setMessage(document.getElementById("runMessage"), err.message, "error");
+  }
 }
 
 function updateJobsTable(jobs) {
@@ -118,6 +350,8 @@ async function refreshJobs() {
 function init() {
   fillTimeframes(document.getElementById("timeframe"));
   fillTimeframes(document.getElementById("dataTimeframe"));
+  fillTimeframes(document.getElementById("executionTf"));
+  fillProfiles(document.getElementById("profile"));
 
   document
     .getElementById("fetchForm")
@@ -190,13 +424,54 @@ function init() {
       }
     });
 
-  // 任务表单默认时间设置（仅用于拉取任务）
+  document
+    .getElementById("runForm")
+    .addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const msg = document.getElementById("runMessage");
+      setMessage(msg, "提交中…");
+      try {
+        const payload = {
+          symbol: document.getElementById("runSymbol").value.trim(),
+          profile: document.getElementById("profile").value,
+          execution_timeframe: document.getElementById("executionTf").value,
+          start_ts: tsFromInput(document.getElementById("runStart").value),
+          end_ts: tsFromInput(document.getElementById("runEnd").value),
+          initial_balance: Number(document.getElementById("initialBalance").value || 0),
+          fee_rate: Number(document.getElementById("feeRate").value || 0),
+        };
+        if (!payload.symbol || !payload.start_ts || !payload.end_ts) {
+          setMessage(msg, "请填写完整参数", "error");
+          return;
+        }
+        const res = await safeFetch("/api/backtest/runs", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        setMessage(msg, `回测 ${res.run.id} 已创建`, "success");
+        refreshRunsList();
+      } catch (err) {
+        setMessage(msg, err.message, "error");
+      }
+    });
+
+  document
+    .getElementById("refreshRunsList")
+    .addEventListener("click", refreshRunsList);
+
+  // 默认时间：拉取任务 24h、回测任务 7 天
   const now = new Date();
-  const earlier = new Date(now.getTime() - 24 * 3600 * 1000);
+  const dayAgo = new Date(now.getTime() - 24 * 3600 * 1000);
   document.getElementById("end").value = toLocalInput(now);
-  document.getElementById("start").value = toLocalInput(earlier);
+  document.getElementById("start").value = toLocalInput(dayAgo);
+
+  const weekAgo = new Date(now.getTime() - 7 * 24 * 3600 * 1000);
+  document.getElementById("runEnd").value = toLocalInput(now);
+  document.getElementById("runStart").value = toLocalInput(weekAgo);
 
   refreshJobs();
+  refreshRunsList();
 }
 
 document.addEventListener("DOMContentLoaded", init);
