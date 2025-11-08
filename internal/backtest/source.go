@@ -1,6 +1,9 @@
 package backtest
 
-import "context"
+import (
+	"brale/internal/market"
+	"context"
+)
 
 // FetchRequest 描述一次远端 K 线请求。
 type FetchRequest struct {
@@ -13,6 +16,6 @@ type FetchRequest struct {
 
 // CandleSource 统一不同交易所/数据源的拉取行为。
 type CandleSource interface {
-	Fetch(ctx context.Context, req FetchRequest) ([]Candle, error)
+	Fetch(ctx context.Context, req FetchRequest) ([]market.Candle, error)
 	Name() string
 }

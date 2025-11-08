@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"brale/internal/execution"
+	"brale/internal/market"
 )
 
 // ResultRecorder 将执行记录写入 backtest_orders 表，供 Recorder 接口复用。
@@ -18,7 +18,7 @@ func NewResultRecorder(store *ResultStore) *ResultRecorder {
 	return &ResultRecorder{store: store}
 }
 
-func (r *ResultRecorder) RecordOrder(ctx context.Context, order *execution.Order) (int64, error) {
+func (r *ResultRecorder) RecordOrder(ctx context.Context, order *market.Order) (int64, error) {
 	if r == nil || r.store == nil {
 		return 0, fmt.Errorf("result recorder 未初始化")
 	}

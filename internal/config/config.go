@@ -46,8 +46,7 @@ type Config struct {
 		LastDecisionMaxAgeSec   int                       `toml:"last_decision_max_age_seconds"`
 		ActiveHorizon           string                    `toml:"active_horizon"`
 		HoldingProfiles         map[string]HorizonProfile `toml:"holding_horizon_profiles"`
-		// 模型配置：完全通过配置文件提供，不再使用环境变量
-		Models []struct {
+		Models                  []struct {
 			ID       string            `toml:"id"`       // 唯一标识（如 openai/deepseek/qwen_自定义名）
 			Provider string            `toml:"provider"` // openai | deepseek | qwen（均按 OpenAI 兼容接口调用）
 			Enabled  bool              `toml:"enabled"`

@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"strconv"
 	"time"
+
+	"brale/internal/market"
 )
 
 // BinanceSource 基于 Binance USDT 合约 REST /fapi/v1/klines。
@@ -28,7 +30,7 @@ func NewBinanceSource(base string) *BinanceSource {
 
 func (b *BinanceSource) Name() string { return "binance" }
 
-func (b *BinanceSource) Fetch(ctx context.Context, req FetchRequest) ([]Candle, error) {
+func (b *BinanceSource) Fetch(ctx context.Context, req FetchRequest) ([]market.Candle, error) {
 	if req.Symbol == "" || req.Interval == "" {
 		return nil, fmt.Errorf("symbol/interval 不能为空")
 	}
@@ -63,12 +65,12 @@ func (b *BinanceSource) Fetch(ctx context.Context, req FetchRequest) ([]Candle, 
 	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
 		return nil, err
 	}
-	out := make([]Candle, 0, len(raw))
+	out := make([]market.Candle, 0, len(raw))
 	for _, row := range raw {
 		if len(row) < 7 {
 			continue
 		}
-		out = append(out, Candle{
+		out = append(out, market.Candle{
 			OpenTime:  toInt64(row[0]),
 			Open:      toFloat(row[1]),
 			High:      toFloat(row[2]),

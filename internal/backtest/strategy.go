@@ -3,8 +3,9 @@ package backtest
 import (
 	"context"
 
-	"brale/internal/ai"
 	brcfg "brale/internal/config"
+	"brale/internal/decision"
+	"brale/internal/market"
 )
 
 // AILogRecord 记录单次模型输出（含输入提示词）。
@@ -16,14 +17,14 @@ type AILogRecord struct {
 	RawOutput    string
 	RawJSON      string
 	MetaSummary  string
-	Decisions    []ai.Decision
+	Decisions    []decision.Decision
 	Error        string
 	Note         string
 }
 
 // Strategy 用于根据给定的 K 线快照生成 AI 决策。
 type Strategy interface {
-	Decide(ctx context.Context, req StrategyRequest) (ai.DecisionResult, error)
+	Decide(ctx context.Context, req StrategyRequest) (decision.DecisionResult, error)
 	Logs() []AILogRecord
 	Close() error
 }
@@ -48,7 +49,7 @@ type StrategyRequest struct {
 	ProfileName string
 	Profile     brcfg.HorizonProfile
 	CurrentTime int64
-	Timeframes  map[string][]Candle
+	Timeframes  map[string][]market.Candle
 	Positions   []StrategyPosition
 }
 

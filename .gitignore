@@ -13,3 +13,4 @@ configs/config.toml
 # Do not publish this helper file
 AGENTS.md
 
+data/

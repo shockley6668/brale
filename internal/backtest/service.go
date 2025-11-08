@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"brale/internal/logger"
+	"brale/internal/market"
 
 	"github.com/google/uuid"
 	"golang.org/x/time/rate"
@@ -305,7 +306,7 @@ func (s *Service) ManifestInfo(ctx context.Context, symbol, timeframe string) (M
 }
 
 // QueryCandles 读取指定区间 K 线。
-func (s *Service) QueryCandles(ctx context.Context, symbol, timeframe string, start, end int64, limit int) ([]Candle, error) {
+func (s *Service) QueryCandles(ctx context.Context, symbol, timeframe string, start, end int64, limit int) ([]market.Candle, error) {
 	if symbol == "" || timeframe == "" {
 		return nil, errors.New("symbol/timeframe 不能为空")
 	}
@@ -313,7 +314,7 @@ func (s *Service) QueryCandles(ctx context.Context, symbol, timeframe string, st
 }
 
 // AllCandles 返回完整数据集。
-func (s *Service) AllCandles(ctx context.Context, symbol, timeframe string) ([]Candle, error) {
+func (s *Service) AllCandles(ctx context.Context, symbol, timeframe string) ([]market.Candle, error) {
 	if symbol == "" || timeframe == "" {
 		return nil, errors.New("symbol/timeframe 不能为空")
 	}

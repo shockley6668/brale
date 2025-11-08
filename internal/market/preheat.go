@@ -8,20 +8,19 @@ import (
 	"time"
 
 	"brale/internal/logger"
-	"brale/internal/store"
 )
 
 // 中文说明：
 // 预热器：进程启动时，使用 REST 拉取最近 N 根 K 线，避免 WS 冷启动期间上下文为空。
 
 type Preheater struct {
-	Store   store.KlineStore
+	Store   KlineStore
 	Max     int
 	Client  *http.Client
 	BaseURL string // https://fapi.binance.com
 }
 
-func NewPreheater(s store.KlineStore, max int) *Preheater {
+func NewPreheater(s KlineStore, max int) *Preheater {
 	return &Preheater{Store: s, Max: max, Client: &http.Client{Timeout: 15 * time.Second}, BaseURL: "https://fapi.binance.com"}
 }
 
@@ -118,7 +117,7 @@ func (p *Preheater) Warmup(ctx context.Context, symbols []string, lookbacks map[
 }
 
 // fetchKlines 使用 Binance REST /fapi/v1/klines
-func (p *Preheater) fetchKlines(ctx context.Context, symbol, interval string, limit int) ([]store.Kline, error) {
+func (p *Preheater) fetchKlines(ctx context.Context, symbol, interval string, limit int) ([]Candle, error) {
 	url := fmt.Sprintf("%s/fapi/v1/klines?symbol=%s&interval=%s&limit=%d", p.BaseURL, symbol, interval, limit)
 	logger.Debugf("[预热] REST %s", url)
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -132,11 +131,11 @@ func (p *Preheater) fetchKlines(ctx context.Context, symbol, interval string, li
 	if err := json.NewDecoder(resp.Body).Decode(&arr); err != nil {
 		return nil, err
 	}
-	out := make([]store.Kline, 0, len(arr))
+	out := make([]Candle, 0, len(arr))
 	for _, k := range arr {
 		// 简化解析：按索引取需要的字段
 		// openTime(0), open(1), high(2), low(3), close(4), volume(5), closeTime(6)
-		kl := store.Kline{}
+		kl := Candle{}
 		if v, ok := k[0].(float64); ok {
 			kl.OpenTime = int64(v)
 		}

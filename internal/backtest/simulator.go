@@ -9,10 +9,10 @@ import (
 	"sync"
 	"time"
 
-	"brale/internal/ai"
 	brcfg "brale/internal/config"
-	"brale/internal/execution"
+	"brale/internal/decision"
 	"brale/internal/logger"
+	"brale/internal/market"
 
 	"github.com/google/uuid"
 )
@@ -32,7 +32,7 @@ type SimulatorConfig struct {
 	Strategy       StrategyFactory
 	Notifier       Notifier
 	MaxConcurrent  int
-	OrderRecorder  execution.Recorder
+	OrderRecorder  market.Recorder
 }
 
 // Simulator 负责将历史 K 线 + 决策策略推演为资金曲线。
@@ -45,7 +45,7 @@ type Simulator struct {
 	defaultProf string
 	factory     StrategyFactory
 	notifier    Notifier
-	orderRec    execution.Recorder
+	orderRec    market.Recorder
 
 	sem     chan struct{}
 	baseCtx context.Context
@@ -227,10 +227,10 @@ type simRunner struct {
 	cfg           RunConfig
 	profile       brcfg.HorizonProfile
 	notifier      Notifier
-	orderRecorder execution.Recorder
+	orderRecorder market.Recorder
 }
 
-func newSimRunner(store *Store, results *ResultStore, factory StrategyFactory, fetcher *Service, lookbacks map[string]int, cfg RunConfig, profile brcfg.HorizonProfile, notifier Notifier, recorder execution.Recorder) *simRunner {
+func newSimRunner(store *Store, results *ResultStore, factory StrategyFactory, fetcher *Service, lookbacks map[string]int, cfg RunConfig, profile brcfg.HorizonProfile, notifier Notifier, recorder market.Recorder) *simRunner {
 	return &simRunner{
 		store:         store,
 		results:       results,
@@ -244,7 +244,7 @@ func newSimRunner(store *Store, results *ResultStore, factory StrategyFactory, f
 	}
 }
 
-func (r *simRunner) recordOrder(ctx context.Context, order execution.Order) int64 {
+func (r *simRunner) recordOrder(ctx context.Context, order market.Order) int64 {
 	if r.orderRecorder == nil {
 		return 0
 	}
@@ -288,7 +288,7 @@ func (r *simRunner) Run(ctx context.Context, runID string) error {
 	if len(baseCandles) < 2 {
 		return fmt.Errorf("基础周期数据不足")
 	}
-	frameData := make(map[string][]Candle, len(timeframes))
+	frameData := make(map[string][]market.Candle, len(timeframes))
 	execKey := strings.ToLower(r.cfg.ExecutionTimeframe)
 	frameData[execKey] = baseCandlesAll
 	for _, tfName := range timeframes {
@@ -347,7 +347,7 @@ func (r *simRunner) Run(ctx context.Context, runID string) error {
 		default:
 		}
 		currentTime := candle.CloseTime
-		slices := make(map[string][]Candle, len(frameData))
+		slices := make(map[string][]market.Candle, len(frameData))
 		globalIdx := baseStartIdx + idx
 		for tfName, candles := range frameData {
 			if tfName == execKey {
@@ -401,7 +401,7 @@ func (r *simRunner) Run(ctx context.Context, runID string) error {
 		last := baseCandles[len(baseCandles)-1]
 		side := state.position.side
 		action := "close_" + side
-		dummy := ai.Decision{Symbol: r.cfg.Symbol, Action: action}
+		dummy := decision.Decision{Symbol: r.cfg.Symbol, Action: action}
 		r.handleClose(ctx, runID, state, last, dummy, side, action, time.UnixMilli(last.CloseTime))
 	}
 
@@ -414,7 +414,7 @@ func (r *simRunner) Run(ctx context.Context, runID string) error {
 	return nil
 }
 
-func (r *simRunner) applyDecisions(ctx context.Context, runID string, state *portfolioState, candle Candle, res ai.DecisionResult) {
+func (r *simRunner) applyDecisions(ctx context.Context, runID string, state *portfolioState, candle market.Candle, res decision.DecisionResult) {
 	if len(res.Decisions) == 0 {
 		return
 	}
@@ -423,7 +423,7 @@ func (r *simRunner) applyDecisions(ctx context.Context, runID string, state *por
 		if !strings.EqualFold(d.Symbol, r.cfg.Symbol) {
 			continue
 		}
-		action := ai.NormalizeAction(d.Action)
+		action := decision.NormalizeAction(d.Action)
 		switch action {
 		case "open_long":
 			r.handleOpen(ctx, runID, state, candle, d, "long", action, curTime)
@@ -443,7 +443,7 @@ func (r *simRunner) applyDecisions(ctx context.Context, runID string, state *por
 	}
 }
 
-func (r *simRunner) handleOpen(ctx context.Context, runID string, state *portfolioState, candle Candle, d ai.Decision, side, action string, ts time.Time) {
+func (r *simRunner) handleOpen(ctx context.Context, runID string, state *portfolioState, candle market.Candle, d decision.Decision, side, action string, ts time.Time) {
 	if state.position != nil && state.position.side == side {
 		return
 	}
@@ -478,7 +478,7 @@ func (r *simRunner) handleOpen(ctx context.Context, runID string, state *portfol
 	takeProfit := d.TakeProfit
 	stopLoss := d.StopLoss
 	expectedRR := calcExpectedRR(side, price, takeProfit, stopLoss)
-	orderID := r.recordOrder(ctx, execution.Order{
+	orderID := r.recordOrder(ctx, market.Order{
 		RunID:      runID,
 		Symbol:     r.cfg.Symbol,
 		Action:     action,
@@ -510,7 +510,7 @@ func (r *simRunner) handleOpen(ctx context.Context, runID string, state *portfol
 	}
 }
 
-func (r *simRunner) handleClose(ctx context.Context, runID string, state *portfolioState, candle Candle, d ai.Decision, side, action string, ts time.Time) {
+func (r *simRunner) handleClose(ctx context.Context, runID string, state *portfolioState, candle market.Candle, d decision.Decision, side, action string, ts time.Time) {
 	pos := state.position
 	if pos == nil || pos.side != side {
 		return
@@ -527,7 +527,7 @@ func (r *simRunner) handleClose(ctx context.Context, runID string, state *portfo
 	state.balance += pnl - fee
 
 	rawDecision, _ := json.Marshal(d)
-	orderID := r.recordOrder(ctx, execution.Order{
+	orderID := r.recordOrder(ctx, market.Order{
 		RunID:      runID,
 		Symbol:     r.cfg.Symbol,
 		Action:     action,
@@ -576,7 +576,7 @@ func (r *simRunner) handleClose(ctx context.Context, runID string, state *portfo
 	state.position = nil
 }
 
-func (r *simRunner) handlePartialClose(ctx context.Context, runID string, state *portfolioState, candle Candle, d ai.Decision, ts time.Time) {
+func (r *simRunner) handlePartialClose(ctx context.Context, runID string, state *portfolioState, candle market.Candle, d decision.Decision, ts time.Time) {
 	pos := state.position
 	if pos == nil {
 		return
@@ -607,7 +607,7 @@ func (r *simRunner) handlePartialClose(ctx context.Context, runID string, state 
 	state.balance += pnl - fee
 
 	rawDecision, _ := json.Marshal(d)
-	orderID := r.recordOrder(ctx, execution.Order{
+	orderID := r.recordOrder(ctx, market.Order{
 		RunID:      runID,
 		Symbol:     r.cfg.Symbol,
 		Action:     "partial_close",
@@ -663,7 +663,7 @@ func (r *simRunner) handlePartialClose(ctx context.Context, runID string, state 
 	}
 }
 
-func (r *simRunner) recordSnapshot(ctx context.Context, runID string, state *portfolioState, candle Candle) {
+func (r *simRunner) recordSnapshot(ctx context.Context, runID string, state *portfolioState, candle market.Candle) {
 	price := candle.Close
 	exposure := 0.0
 	if state.position != nil {
@@ -971,7 +971,7 @@ func (r *simRunner) waitFetchJob(ctx context.Context, runID string, job FetchJob
 	}
 }
 
-func (r *simRunner) persistRunLog(ctx context.Context, runID string, candle Candle, timeframe string, logs []AILogRecord) {
+func (r *simRunner) persistRunLog(ctx context.Context, runID string, candle market.Candle, timeframe string, logs []AILogRecord) {
 	if r.results == nil || len(logs) == 0 {
 		return
 	}
@@ -987,7 +987,7 @@ func (r *simRunner) persistRunLog(ctx context.Context, runID string, candle Cand
 			RawOutput:    rec.RawOutput,
 			RawJSON:      rec.RawJSON,
 			MetaSummary:  rec.MetaSummary,
-			Decisions:    append([]ai.Decision(nil), rec.Decisions...),
+			Decisions:    append([]decision.Decision(nil), rec.Decisions...),
 			Error:        rec.Error,
 			Note:         rec.Note,
 		}
@@ -1017,7 +1017,7 @@ func calcExpectedRR(side string, entry, tp, sl float64) float64 {
 	}
 }
 
-func (r *simRunner) partialCloseQty(d ai.Decision, price, total float64) float64 {
+func (r *simRunner) partialCloseQty(d decision.Decision, price, total float64) float64 {
 	if price <= 0 || total <= 0 {
 		return 0
 	}
@@ -1046,7 +1046,7 @@ func (r *simRunner) partialCloseQty(d ai.Decision, price, total float64) float64
 	return qty
 }
 
-func (r *simRunner) handleAdjustStopLoss(ctx context.Context, runID string, state *portfolioState, candle Candle, d ai.Decision, ts time.Time) {
+func (r *simRunner) handleAdjustStopLoss(ctx context.Context, runID string, state *portfolioState, candle market.Candle, d decision.Decision, ts time.Time) {
 	pos := state.position
 	if pos == nil {
 		return
@@ -1084,7 +1084,7 @@ func (r *simRunner) handleAdjustStopLoss(ctx context.Context, runID string, stat
 		"new_stop_loss": newSL,
 	}
 	metaJSON, _ := json.Marshal(meta)
-	if _, err := r.orderRecorder.RecordOrder(ctx, &execution.Order{
+	if _, err := r.orderRecorder.RecordOrder(ctx, &market.Order{
 		RunID:      runID,
 		Symbol:     r.cfg.Symbol,
 		Action:     "adjust_stop_loss",

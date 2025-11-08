@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"brale/internal/ai"
+	"brale/internal/decision"
 
 	_ "modernc.org/sqlite"
 )
@@ -113,11 +113,11 @@ func ensureResultSchema(db *sql.DB) error {
 			pnl REAL,
 			pnl_pct REAL,
 			holding_ms INTEGER,
+			opened_at INTEGER,
+			closed_at INTEGER,
 			take_profit REAL,
 			stop_loss REAL,
 			expected_rr REAL,
-			opened_at INTEGER,
-			closed_at INTEGER,
 			FOREIGN KEY(run_id) REFERENCES backtest_runs(id) ON DELETE CASCADE
 		);`,
 		`CREATE TABLE IF NOT EXISTS backtest_snapshots (
@@ -312,21 +312,21 @@ func (s *ResultStore) InsertSnapshot(ctx context.Context, snap Snapshot) (int64,
 
 // RunLog 记录一次 AI 决策调用的完整结果。
 type RunLog struct {
-	ID           int64         `json:"id"`
-	RunID        string        `json:"run_id"`
-	CandleTS     int64         `json:"candle_ts"`
-	Timeframe    string        `json:"timeframe"`
-	ProviderID   string        `json:"provider_id"`
-	Stage        string        `json:"stage"`
-	SystemPrompt string        `json:"system_prompt"`
-	UserPrompt   string        `json:"user_prompt"`
-	RawOutput    string        `json:"raw_output"`
-	RawJSON      string        `json:"raw_json"`
-	MetaSummary  string        `json:"meta_summary"`
-	Decisions    []ai.Decision `json:"decisions"`
-	Error        string        `json:"error"`
-	Note         string        `json:"note"`
-	CreatedAt    time.Time     `json:"created_at"`
+	ID           int64               `json:"id"`
+	RunID        string              `json:"run_id"`
+	CandleTS     int64               `json:"candle_ts"`
+	Timeframe    string              `json:"timeframe"`
+	ProviderID   string              `json:"provider_id"`
+	Stage        string              `json:"stage"`
+	SystemPrompt string              `json:"system_prompt"`
+	UserPrompt   string              `json:"user_prompt"`
+	RawOutput    string              `json:"raw_output"`
+	RawJSON      string              `json:"raw_json"`
+	MetaSummary  string              `json:"meta_summary"`
+	Decisions    []decision.Decision `json:"decisions"`
+	Error        string              `json:"error"`
+	Note         string              `json:"note"`
+	CreatedAt    time.Time           `json:"created_at"`
 }
 
 func (s *ResultStore) InsertRunLog(ctx context.Context, log RunLog) (int64, error) {

@@ -5,17 +5,18 @@ import (
 	"fmt"
 	"strings"
 
-	"brale/internal/ai"
-	"brale/internal/prompt"
+	"brale/internal/decision"
+	"brale/internal/gateway/provider"
 	"brale/internal/store"
+	"brale/internal/strategy"
 )
 
 // AIProxyFactory 基于 LegacyEngineAdapter 的策略工厂。
 type AIProxyFactory struct {
-	Prompt         *prompt.Manager
+	Prompt         *strategy.Manager
 	SystemTemplate string
-	Models         []ai.ModelCfg
-	Aggregator     ai.Aggregator
+	Models         []provider.ModelCfg
+	Aggregator     decision.Aggregator
 	Parallel       bool
 	TimeoutSeconds int
 }
@@ -24,16 +25,16 @@ func (f *AIProxyFactory) NewStrategy(spec StrategySpec) (Strategy, error) {
 	if f == nil {
 		return nil, fmt.Errorf("空策略工厂")
 	}
-	providers := ai.BuildProvidersFromConfig(f.Models)
+	providers := provider.BuildProvidersFromConfig(f.Models)
 	if len(providers) == 0 {
 		return nil, fmt.Errorf("未启用任何模型 Provider")
 	}
 	agg := f.Aggregator
 	if agg == nil {
-		agg = ai.FirstWinsAggregator{}
+		agg = decision.FirstWinsAggregator{}
 	}
 	strat := &aiProxyStrategy{}
-	engine := &ai.LegacyEngineAdapter{
+	engine := &decision.LegacyEngineAdapter{
 		Providers:      providers,
 		Agg:            agg,
 		PromptMgr:      f.Prompt,
@@ -50,13 +51,13 @@ func (f *AIProxyFactory) NewStrategy(spec StrategySpec) (Strategy, error) {
 }
 
 type aiProxyStrategy struct {
-	engine   *ai.LegacyEngineAdapter
+	engine   *decision.LegacyEngineAdapter
 	lastLogs []AILogRecord
 }
 
-func (s *aiProxyStrategy) Decide(ctx context.Context, req StrategyRequest) (ai.DecisionResult, error) {
+func (s *aiProxyStrategy) Decide(ctx context.Context, req StrategyRequest) (decision.DecisionResult, error) {
 	if s.engine == nil {
-		return ai.DecisionResult{}, fmt.Errorf("AI 引擎未初始化")
+		return decision.DecisionResult{}, fmt.Errorf("AI 引擎未初始化")
 	}
 	s.lastLogs = nil
 	mem := store.NewMemoryKlineStore()
@@ -64,20 +65,8 @@ func (s *aiProxyStrategy) Decide(ctx context.Context, req StrategyRequest) (ai.D
 		if len(candles) == 0 {
 			continue
 		}
-		kls := make([]store.Kline, 0, len(candles))
-		for _, c := range candles {
-			kls = append(kls, store.Kline{
-				OpenTime:  c.OpenTime,
-				CloseTime: c.CloseTime,
-				Open:      c.Open,
-				High:      c.High,
-				Low:       c.Low,
-				Close:     c.Close,
-				Volume:    c.Volume,
-			})
-		}
-		if err := mem.Put(ctx, strings.ToUpper(req.Symbol), tf, kls, len(kls)); err != nil {
-			return ai.DecisionResult{}, err
+		if err := mem.Put(ctx, strings.ToUpper(req.Symbol), tf, candles, len(candles)); err != nil {
+			return decision.DecisionResult{}, err
 		}
 	}
 	s.engine.KStore = mem
@@ -88,7 +77,7 @@ func (s *aiProxyStrategy) Decide(ctx context.Context, req StrategyRequest) (ai.D
 	if intervals := req.Profile.AllTimeframes(); len(intervals) > 0 {
 		s.engine.Intervals = intervals
 	}
-	return s.engine.Decide(ctx, ai.Context{
+	return s.engine.Decide(ctx, decision.Context{
 		Candidates: []string{strings.ToUpper(req.Symbol)},
 		Positions:  toSnapshots(req.Positions),
 	})
@@ -103,8 +92,8 @@ func (s *aiProxyStrategy) Logs() []AILogRecord {
 
 func (s *aiProxyStrategy) Close() error { return nil }
 
-// AfterDecide implements ai.DecisionObserver.
-func (s *aiProxyStrategy) AfterDecide(ctx context.Context, trace ai.DecisionTrace) {
+// AfterDecide implements decision.DecisionObserver.
+func (s *aiProxyStrategy) AfterDecide(ctx context.Context, trace decision.DecisionTrace) {
 	logs := make([]AILogRecord, 0, len(trace.Outputs)+1)
 	for _, out := range trace.Outputs {
 		rec := AILogRecord{
@@ -114,7 +103,7 @@ func (s *aiProxyStrategy) AfterDecide(ctx context.Context, trace ai.DecisionTrac
 			UserPrompt:   trace.UserPrompt,
 			RawOutput:    out.Raw,
 			RawJSON:      out.Parsed.RawJSON,
-			Decisions:    append([]ai.Decision(nil), out.Parsed.Decisions...),
+			Decisions:    append([]decision.Decision(nil), out.Parsed.Decisions...),
 			Note:         "provider",
 		}
 		if out.Err != nil {
@@ -134,7 +123,7 @@ func (s *aiProxyStrategy) AfterDecide(ctx context.Context, trace ai.DecisionTrac
 		RawOutput:    trace.Best.Raw,
 		RawJSON:      trace.Best.Parsed.RawJSON,
 		MetaSummary:  trace.Best.Parsed.MetaSummary,
-		Decisions:    append([]ai.Decision(nil), trace.Best.Parsed.Decisions...),
+		Decisions:    append([]decision.Decision(nil), trace.Best.Parsed.Decisions...),
 		Note:         "final",
 	}
 	if trace.Best.Err != nil {
@@ -144,13 +133,13 @@ func (s *aiProxyStrategy) AfterDecide(ctx context.Context, trace ai.DecisionTrac
 	s.lastLogs = logs
 }
 
-func toSnapshots(src []StrategyPosition) []ai.PositionSnapshot {
+func toSnapshots(src []StrategyPosition) []decision.PositionSnapshot {
 	if len(src) == 0 {
 		return nil
 	}
-	out := make([]ai.PositionSnapshot, 0, len(src))
+	out := make([]decision.PositionSnapshot, 0, len(src))
 	for _, p := range src {
-		out = append(out, ai.PositionSnapshot{
+		out = append(out, decision.PositionSnapshot{
 			Symbol:          p.Symbol,
 			Side:            p.Side,
 			EntryPrice:      p.EntryPrice,

@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"brale/internal/market"
+
 	_ "modernc.org/sqlite"
 )
 
@@ -92,7 +94,7 @@ func (s *Store) dbPath(symbol, timeframe string) string {
 }
 
 // InsertCandles 批量写入 K 线（重复 open_time 将被覆盖）。
-func (s *Store) InsertCandles(ctx context.Context, symbol, timeframe string, candles []Candle) (int, error) {
+func (s *Store) InsertCandles(ctx context.Context, symbol, timeframe string, candles []market.Candle) (int, error) {
 	if len(candles) == 0 {
 		return 0, nil
 	}
@@ -225,7 +227,7 @@ func ensureSchema(db *sql.DB, symbol, timeframe string) error {
 }
 
 // QueryCandles 读取指定区间的 K 线（默认按 open_time 升序返回）。
-func (s *Store) QueryCandles(ctx context.Context, symbol, timeframe string, start, end int64, limit int) ([]Candle, error) {
+func (s *Store) QueryCandles(ctx context.Context, symbol, timeframe string, start, end int64, limit int) ([]market.Candle, error) {
 	db, _, err := s.db(symbol, timeframe)
 	if err != nil {
 		return nil, err
@@ -268,9 +270,9 @@ func (s *Store) QueryCandles(ctx context.Context, symbol, timeframe string, star
 		return nil, err
 	}
 	defer rows.Close()
-	var list []Candle
+	var list []market.Candle
 	for rows.Next() {
-		var c Candle
+		var c market.Candle
 		if err := rows.Scan(&c.OpenTime, &c.CloseTime, &c.Open, &c.High, &c.Low, &c.Close, &c.Volume, &c.Trades); err != nil {
 			return nil, err
 		}
@@ -288,7 +290,7 @@ func (s *Store) QueryCandles(ctx context.Context, symbol, timeframe string, star
 }
 
 // ListAllCandles 返回全部 K 线（按 open_time ASC），仅适合同步数据规模较小场景。
-func (s *Store) ListAllCandles(ctx context.Context, symbol, timeframe string) ([]Candle, error) {
+func (s *Store) ListAllCandles(ctx context.Context, symbol, timeframe string) ([]market.Candle, error) {
 	db, _, err := s.db(symbol, timeframe)
 	if err != nil {
 		return nil, err
@@ -300,9 +302,9 @@ func (s *Store) ListAllCandles(ctx context.Context, symbol, timeframe string) ([
 		return nil, err
 	}
 	defer rows.Close()
-	var list []Candle
+	var list []market.Candle
 	for rows.Next() {
-		var c Candle
+		var c market.Candle
 		if err := rows.Scan(&c.OpenTime, &c.CloseTime, &c.Open, &c.High, &c.Low, &c.Close, &c.Volume, &c.Trades); err != nil {
 			return nil, err
 		}
@@ -312,7 +314,7 @@ func (s *Store) ListAllCandles(ctx context.Context, symbol, timeframe string) ([
 }
 
 // RangeCandles 返回 start~end 范围内的全部 K 线（开盘时间闭区间）。
-func (s *Store) RangeCandles(ctx context.Context, symbol, timeframe string, start, end int64) ([]Candle, error) {
+func (s *Store) RangeCandles(ctx context.Context, symbol, timeframe string, start, end int64) ([]market.Candle, error) {
 	db, _, err := s.db(symbol, timeframe)
 	if err != nil {
 		return nil, err
@@ -332,9 +334,9 @@ func (s *Store) RangeCandles(ctx context.Context, symbol, timeframe string, star
 		return nil, err
 	}
 	defer rows.Close()
-	var list []Candle
+	var list []market.Candle
 	for rows.Next() {
-		var c Candle
+		var c market.Candle
 		if err := rows.Scan(&c.OpenTime, &c.CloseTime, &c.Open, &c.High, &c.Low, &c.Close, &c.Volume, &c.Trades); err != nil {
 			return nil, err
 		}
