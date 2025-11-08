@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"brale/internal/logger"
+
 	"github.com/gorilla/websocket"
 )
 
@@ -169,7 +170,7 @@ func (c *CombinedStreamsClient) Connect() error {
 }
 
 // 事件回调设置
-func (c *CombinedStreamsClient) SetOnConnect(fn func()) { c.onConnect = fn }
+func (c *CombinedStreamsClient) SetOnConnect(fn func())         { c.onConnect = fn }
 func (c *CombinedStreamsClient) SetOnDisconnect(fn func(error)) { c.onDisconnect = fn }
 
 func (c *CombinedStreamsClient) AddSubscriber(stream string, buf int) <-chan []byte {

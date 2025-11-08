@@ -150,3 +150,15 @@ min_risk_reward = 3.0
 open_cooldown_seconds = 180
 # max_opens_per_cycle：每个决策周期可新开的最大仓位数
 max_opens_per_cycle = 3
+
+[trading]
+# mode：资金来源模式，现阶段仅支持 static，后续可扩展 live 读取真实余额
+mode = "static"
+# static_balance：静态账户初始资金（USDT）；后续可接入真实余额替换
+static_balance = 10000
+# max_position_pct：单笔最大仓位占用比例（0-1），用于推导默认开仓规模
+max_position_pct = 0.05
+# default_position_usd：若填写则固定为该仓位金额；留 0 则使用 static_balance × max_position_pct
+default_position_usd = 0
+# default_leverage：当模型未给出 leverage 时的兜底倍数
+default_leverage = 2

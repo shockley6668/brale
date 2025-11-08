@@ -194,6 +194,7 @@ func (s *LiveService) tickDecision(ctx context.Context) error {
 	newOpens := 0
 	for _, d := range res.Decisions {
 		entryPrice := 0.0
+		s.applyTradingDefaults(&d)
 		if err := decision.Validate(&d); err != nil {
 			logger.Warnf("AI 决策不合规，已忽略: %v | %+v", err, d)
 			continue
@@ -239,6 +240,27 @@ func (s *LiveService) tickDecision(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func (s *LiveService) applyTradingDefaults(d *decision.Decision) {
+	if s == nil || s.cfg == nil || d == nil {
+		return
+	}
+	if d.Action != "open_long" && d.Action != "open_short" {
+		return
+	}
+	if d.Leverage <= 0 {
+		if def := s.cfg.Trading.DefaultLeverage; def > 0 {
+			logger.Debugf("决策 %s 缺少 leverage，使用默认 %dx", d.Symbol, def)
+			d.Leverage = def
+		}
+	}
+	if d.PositionSizeUSD <= 0 {
+		if size := s.cfg.Trading.PositionSizeUSD(); size > 0 {
+			logger.Debugf("决策 %s 缺少 position_size_usd，使用默认 %.2f USDT", d.Symbol, size)
+			d.PositionSizeUSD = size
+		}
+	}
 }
 
 func (s *LiveService) notifyOpen(ctx context.Context, d decision.Decision, entryPrice float64, validateIv string) {

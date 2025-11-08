@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -90,6 +91,17 @@ type Config struct {
 		OpenCooldownSeconds int     `toml:"open_cooldown_seconds"`
 		MaxOpensPerCycle    int     `toml:"max_opens_per_cycle"`
 	} `toml:"advanced"`
+
+	Trading TradingConfig `toml:"trading"`
+}
+
+// TradingConfig 控制模拟/实盘资金来源与默认仓位策略。
+type TradingConfig struct {
+	Mode               string  `toml:"mode"`                 // "static" | 后续扩展 "live"
+	StaticBalance      float64 `toml:"static_balance"`       // 静态账户资金（USDT）
+	MaxPositionPct     float64 `toml:"max_position_pct"`     // 单笔最大占用比例 0~1
+	DefaultPositionUSD float64 `toml:"default_position_usd"` // 若>0，直接作为 fallback 仓位
+	DefaultLeverage    int     `toml:"default_leverage"`     // 缺省杠杆
 }
 
 // HorizonProfile 描述特定持仓周期所需的时间段与指标参数。
@@ -138,6 +150,22 @@ type RSIConfig struct {
 	Period     int     `toml:"period"`
 	Oversold   float64 `toml:"oversold"`
 	Overbought float64 `toml:"overbought"`
+}
+
+// PositionSizeUSD 返回默认仓位大小（若设置 default_position_usd 则直接返回，
+// 否则按 static_balance × max_position_pct 计算，自动限制不超过账户余额）。
+func (t TradingConfig) PositionSizeUSD() float64 {
+	if t.DefaultPositionUSD > 0 {
+		return t.DefaultPositionUSD
+	}
+	if t.StaticBalance > 0 && t.MaxPositionPct > 0 {
+		size := t.StaticBalance * t.MaxPositionPct
+		if size <= 0 {
+			return 0
+		}
+		return math.Min(size, t.StaticBalance)
+	}
+	return 0
 }
 
 // AllTimeframes 返回去重后的完整时间段列表（entry → confirm → background）。
@@ -360,6 +388,23 @@ func applyDefaults(c *Config) {
 	if c.Advanced.MaxOpensPerCycle <= 0 {
 		c.Advanced.MaxOpensPerCycle = 3
 	}
+
+	// Trading defaults
+	if c.Trading.Mode == "" {
+		c.Trading.Mode = "static"
+	}
+	if c.Trading.StaticBalance <= 0 {
+		c.Trading.StaticBalance = 10000
+	}
+	if c.Trading.MaxPositionPct <= 0 || c.Trading.MaxPositionPct > 1 {
+		c.Trading.MaxPositionPct = 0.05
+	}
+	if c.Trading.DefaultLeverage <= 0 {
+		c.Trading.DefaultLeverage = 2
+	}
+	if c.Trading.DefaultPositionUSD < 0 {
+		c.Trading.DefaultPositionUSD = 0
+	}
 }
 
 // 基础校验
@@ -412,6 +457,21 @@ func validate(c *Config) error {
 		if c.Backtest.RateLimitPerMin <= 0 {
 			return fmt.Errorf("backtest.rate_limit_per_min 需 > 0")
 		}
+	}
+	if c.Trading.Mode == "" {
+		c.Trading.Mode = "static"
+	}
+	if c.Trading.Mode != "static" {
+		return fmt.Errorf("trading.mode 当前仅支持 static，收到 %s", c.Trading.Mode)
+	}
+	if c.Trading.StaticBalance <= 0 {
+		return fmt.Errorf("trading.static_balance 需 > 0")
+	}
+	if c.Trading.MaxPositionPct <= 0 || c.Trading.MaxPositionPct > 1 {
+		return fmt.Errorf("trading.max_position_pct 需在 (0, 1] 区间")
+	}
+	if c.Trading.DefaultLeverage <= 0 {
+		return fmt.Errorf("trading.default_leverage 需 > 0")
 	}
 	return nil
 }
