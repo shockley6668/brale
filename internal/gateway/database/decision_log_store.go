@@ -103,6 +103,7 @@ type LiveDecisionQuery struct {
 	Provider string
 	Stage    string
 	Limit    int
+	Offset   int
 }
 
 // NewDecisionLogStore 初始化 SQLite 存储。
@@ -338,6 +339,10 @@ func (s *DecisionLogStore) ListDecisions(ctx context.Context, q LiveDecisionQuer
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
+	offset := q.Offset
+	if offset < 0 {
+		offset = 0
+	}
 	var args []interface{}
 	var sb strings.Builder
 	sb.WriteString(`SELECT id, trace_id, ts, candidates, timeframes, horizon, provider_id, stage,
@@ -356,8 +361,8 @@ func (s *DecisionLogStore) ListDecisions(ctx context.Context, q LiveDecisionQuer
 		sb.WriteString(" AND symbols LIKE ?")
 		args = append(args, symbolLikePattern(q.Symbol))
 	}
-	sb.WriteString(" ORDER BY ts DESC, id DESC LIMIT ?")
-	args = append(args, limit)
+	sb.WriteString(" ORDER BY ts DESC, id DESC LIMIT ? OFFSET ?")
+	args = append(args, limit, offset)
 	rows, err := db.QueryContext(ctx, sb.String(), args...)
 	if err != nil {
 		return nil, err

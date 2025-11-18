@@ -40,6 +40,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	})
 	liveRouter := NewRouter(cfg.Logs, cfg.FreqtradeHandler)
 	liveRouter.Register(router.Group("/api/live"))
+	registerAdminRoutes(router)
 	return &Server{addr: cfg.Addr, router: router}, nil
 }
 

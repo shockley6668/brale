@@ -48,8 +48,16 @@ func (r *Router) handleLiveDecisions(c *gin.Context) {
 		return
 	}
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
+	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	if limit <= 0 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
 	query := database.LiveDecisionQuery{
 		Limit:    limit,
+		Offset:   offset,
 		Provider: c.Query("provider"),
 		Stage:    c.Query("stage"),
 		Symbol:   c.Query("symbol"),

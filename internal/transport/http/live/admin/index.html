@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Brale Admin</title>
+  <link rel="stylesheet" href="/admin/app.css" />
+  <script src="https://unpkg.com/vue@3.4.21/dist/vue.global.prod.js"></script>
+</head>
+<body>
+  <div id="app">
+    <header class="app-header">
+      <h1>Brale 实盘监控</h1>
+      <div class="actions">
+        <button @click="manualRefresh" :disabled="loading">刷新</button>
+        <label>
+          自动刷新
+          <select v-model.number="refreshInterval">
+            <option :value="0">关闭</option>
+            <option :value="10">10s</option>
+            <option :value="30">30s</option>
+            <option :value="60">60s</option>
+          </select>
+        </label>
+      </div>
+    </header>
+
+    <section class="status-bar">
+      <div>
+        <strong>决策记录</strong>
+        <span>第 {{ page }} 页 · 每页 {{ pageSize }} 条</span>
+      </div>
+      <div>
+        <strong>仓位</strong>
+        <span>{{ positions.length }} 个</span>
+      </div>
+      <div v-if="error" class="error">{{ error }}</div>
+    </section>
+
+    <main class="grid">
+      <section class="card traces">
+        <div class="card-head">
+          <h2>决策流程</h2>
+          <div class="pagination">
+            <button class="ghost" @click.stop="prevPage" :disabled="page === 1">上一页</button>
+            <span>第 {{ page }} 页</span>
+            <button class="ghost" @click.stop="nextPage" :disabled="!hasNext">下一页</button>
+          </div>
+        </div>
+        <div v-if="!traces.length" class="empty">暂无实时决策</div>
+        <div v-for="trace in traces" :key="trace.trace_id" class="trace">
+          <header @click="toggleTrace(trace.trace_id)">
+            <div>
+              <h3>{{ formatTraceTitle(trace) }}</h3>
+              <small>{{ formatTs(trace.ts) }} · {{ trace.horizon }}</small>
+            </div>
+            <button>{{ expanded.has(trace.trace_id) ? '收起' : '展开' }}</button>
+          </header>
+          <transition name="fade">
+            <div v-if="expanded.has(trace.trace_id)" class="steps">
+              <div class="tab-bar" v-if="trace.steps.length">
+                <button
+                  class="tab"
+                  :class="{ active: !activeTab[trace.trace_id] || activeTab[trace.trace_id] === 'ALL' }"
+                  @click.stop="setActiveTab(trace.trace_id, 'ALL')"
+                >
+                  全部
+                </button>
+                <button
+                  v-for="stage in traceStages(trace)"
+                  :key="stage"
+                  class="tab"
+                  :class="{ active: activeTab[trace.trace_id] === stage }"
+                  @click.stop="setActiveTab(trace.trace_id, stage)"
+                >
+                  {{ stageLabel(trace, stage) }}
+                </button>
+              </div>
+              <article v-for="(step, idx) in filteredSteps(trace)" :key="idx" class="step">
+                <div class="step-head">
+                  <div>
+                    <span class="stage">{{ step.stage }}</span>
+                    <span class="provider">{{ step.provider_id || 'n/a' }}</span>
+                  </div>
+                  <small>{{ formatTs(step.ts) }}</small>
+                </div>
+                <div class="step-body">
+                  <p class="status" v-if="step.error">⚠ {{ step.error }}</p>
+                  <p class="status" v-else>{{ summarizeDecisions(step.decisions) || preview(step.meta_summary || step.raw_output || step.raw_json) }}</p>
+                  <details>
+                    <summary>查看 Prompt</summary>
+                    <div class="prompt-block">
+                      <h4>System</h4>
+                      <pre>{{ step.system_prompt || '-' }}</pre>
+                    </div>
+                    <div class="prompt-block">
+                      <h4>User</h4>
+                      <pre>{{ step.user_prompt || '-' }}</pre>
+                    </div>
+                  </details>
+                  <details>
+                    <summary>查看输出</summary>
+                    <pre>{{ step.raw_output || step.raw_json || step.meta_summary || '-' }}</pre>
+                  </details>
+                  <div v-if="step.images && step.images.length" class="images">
+                    <figure v-for="(img, i) in step.images" :key="i">
+                      <img :src="img.data_uri" :alt="img.description || 'image'" />
+                      <figcaption>{{ img.description || 'LLM 输入图' }}</figcaption>
+                    </figure>
+                  </div>
+                </div>
+              </article>
+            </div>
+          </transition>
+        </div>
+      </section>
+
+      <section class="card positions">
+        <div class="card-head">
+          <h2>Freqtrade 仓位</h2>
+          <button @click="fetchPositions">刷新</button>
+        </div>
+        <div v-if="!positions.length" class="empty">暂无持仓</div>
+        <table v-else>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>交易对</th>
+              <th>方向</th>
+              <th>入场价</th>
+              <th>数量</th>
+              <th>仓位</th>
+              <th>杠杆</th>
+              <th>持仓时长</th>
+              <th>开仓时间</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="pos in positions" :key="pos.trade_id">
+              <td>{{ pos.trade_id }}</td>
+              <td>{{ pos.symbol }}</td>
+              <td>{{ pos.side }}</td>
+              <td>{{ formatNumber(pos.entry_price) }}</td>
+              <td>{{ formatNumber(pos.amount, 4) }}</td>
+              <td>{{ formatNumber(pos.stake) }}</td>
+              <td>{{ pos.leverage ? pos.leverage + 'x' : '-' }}</td>
+              <td>{{ formatDuration(pos.holding_ms) }}</td>
+              <td>{{ formatTs(pos.opened_at) }}</td>
+              <td><button class="ghost" @click="quickClose(pos)">快捷关闭</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+  </div>
+  <script src="/admin/app.js" defer></script>
+</body>
+</html>
