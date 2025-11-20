@@ -232,6 +232,16 @@ timeout_seconds = 15
 insecure_skip_verify = false
 # webhook_url：freqtrade webook 将回调 Brale 的地址，需与 freqtrade config 保持一致。
 webhook_url = "http://127.0.0.1:9991/api/live/freqtrade/webhook"
+# stop_loss_webhook_url：Brale 向 risk_server 发送调整止损请求的地址（可选）。
+stop_loss_webhook_url = "http://riskserver:9000/adjust-stoploss"
+# stop_loss_webhook_secret：可选，若填写将作为 X-Webhook-Secret 头发送。
+stop_loss_webhook_secret = "Zzzsyzxl999888777666Zzzsyzxl"
+# take_profit_webhook_url：Brale 发送调整止盈请求的地址（可选）。
+take_profit_webhook_url = "http://riskserver:9000/adjust-takeprofit"
+# take_profit_webhook_secret：可选，若填写将作为 X-Webhook-Secret 头发送。
+take_profit_webhook_secret = "Zzzsyzxl999888777666Zzzsyzxl"
+# risk_store_path：Brale 与 Freqtrade 共享止盈止损的 SQLite 路径（可选）。
+risk_store_path = "data/trade_risk.db"
 
 [advanced]
 # liquidity_filter_usd_m：按 OI×价格估算的最低流动性（百万 USD）。

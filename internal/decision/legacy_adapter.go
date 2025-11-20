@@ -329,10 +329,11 @@ func (e *LegacyEngineAdapter) buildUserSummary(ctx context.Context, input Contex
 	}
 	req := `请先输出简短的【思维链】（3句，说明判断依据与结论），换行后仅输出 JSON 数组。
 	数组中每项需含：symbol、action、reasoning。
-	reasoning中当多空信号差距在30以上时，就可以执行开仓操作，需要包含bull_score，bear_score，若没有图就包含“没有收到图片”
+	reasoning中当多空信号差距在30以上时，就可以执行开仓操作，需要包含bull_score，bear_score
 	如已有仓位且需要部分止盈/减仓，添加 close_ratio（0-1），无仓位时勿返回。
 	若 action 为 open_long 或 open_short，必须返回 take_profit、stop_loss（绝对价，浮点）及 leverage（2–50，依信号强度）。
-    若 action 为 adjust_stop_loss，必须返回新 stop_loss。
+    若 action 为 adjust_stop_loss，必须在json中返回新 stop_loss，否则视为无效。
+	若 action 为 adjust_take_profit，必须在 json 中返回 take_profit，否则视为无效。
     示例:
     思维链: 4h 供需不明、15m 无形态。
     [{"symbol":"BTCUSDT","action":"hold","reasoning":"多空信号不足"}]

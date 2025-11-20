@@ -1,0 +1,26 @@
+FROM golang:1.24-bullseye AS build
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=1 GOOS=linux go build -buildvcs=false -o /usr/local/bin/brale ./cmd/brale
+
+FROM debian:bookworm-slim
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates tzdata wget gnupg \
+    && wget -q -O - https://dl.google.com/linux/linux_signing_key.pub \
+        | gpg --dearmor -o /usr/share/keyrings/google-linux.gpg \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-linux.gpg] http://dl.google.com/linux/chrome/deb/ stable main" \
+        > /etc/apt/sources.list.d/google-chrome.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends google-chrome-stable \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY --from=build /usr/local/bin/brale /usr/local/bin/brale
+COPY configs/config.example.toml /app/config.toml
+COPY prompts /app/prompts
+ENV BRALE_CONFIG=/data/config.toml
+VOLUME ["/data","/var/log/brale"]
+EXPOSE 9991
+ENTRYPOINT ["/usr/local/bin/brale"]

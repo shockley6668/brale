@@ -75,16 +75,21 @@ type TradingConfig struct {
 
 // FreqtradeConfig 描述外部执行引擎的访问方式。
 type FreqtradeConfig struct {
-	Enabled            bool    `toml:"enabled"`
-	APIURL             string  `toml:"api_url"`
-	Username           string  `toml:"username"`
-	Password           string  `toml:"password"`
-	APIToken           string  `toml:"api_token"`
-	DefaultStakeUSD    float64 `toml:"default_stake_usd"`
-	DefaultLeverage    int     `toml:"default_leverage"`
-	TimeoutSeconds     int     `toml:"timeout_seconds"`
-	InsecureSkipVerify bool    `toml:"insecure_skip_verify"`
-	WebhookURL         string  `toml:"webhook_url"`
+	Enabled              bool    `toml:"enabled"`
+	APIURL               string  `toml:"api_url"`
+	Username             string  `toml:"username"`
+	Password             string  `toml:"password"`
+	APIToken             string  `toml:"api_token"`
+	DefaultStakeUSD      float64 `toml:"default_stake_usd"`
+	DefaultLeverage      int     `toml:"default_leverage"`
+	TimeoutSeconds       int     `toml:"timeout_seconds"`
+	InsecureSkipVerify   bool    `toml:"insecure_skip_verify"`
+	WebhookURL           string  `toml:"webhook_url"`
+	StopLossWebhookURL   string  `toml:"stop_loss_webhook_url"`
+	StopLossSecret       string  `toml:"stop_loss_webhook_secret"`
+	TakeProfitWebhookURL string  `toml:"take_profit_webhook_url"`
+	TakeProfitSecret     string  `toml:"take_profit_webhook_secret"`
+	RiskStorePath        string  `toml:"risk_store_path"`
 }
 
 // AIConfig 包含与模型、持仓周期相关的所有设置。

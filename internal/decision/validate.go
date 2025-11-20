@@ -9,7 +9,7 @@ import "fmt"
 
 var validActions = map[string]bool{
 	"open_long": true, "open_short": true, "close_long": true, "close_short": true,
-	"hold": true, "wait": true, "adjust_stop_loss": true,
+	"hold": true, "wait": true, "adjust_stop_loss": true, "adjust_take_profit": true,
 }
 
 func ValidateAll(ds []Decision) error {
@@ -42,6 +42,10 @@ func Validate(d *Decision) error {
 	case "adjust_stop_loss":
 		if d.StopLoss <= 0 {
 			return fmt.Errorf("调整止损需提供 stop_loss>0")
+		}
+	case "adjust_take_profit":
+		if d.TakeProfit <= 0 {
+			return fmt.Errorf("调整止盈需提供 take_profit>0")
 		}
 	}
 	return nil

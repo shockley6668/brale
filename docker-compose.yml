@@ -1,0 +1,81 @@
+services:
+  brale:
+    build:
+      context: .
+      dockerfile: Dockerfile.brale
+    environment:
+      BRALE_CONFIG: /app/configs/config.toml
+      BRALE_RISK_DB: /data/trade_risk.db
+      FREQTRADE_API_URL: http://freqtrade:8080/api/v1
+      STOP_LOSS_WEBHOOK_URL: http://riskserver:9000/adjust-stoploss
+      STOP_LOSS_WEBHOOK_SECRET: Zzzsyzxl999888777666Zzzsyzxl
+      TAKE_PROFIT_WEBHOOK_URL: http://riskserver:9000/adjust-takeprofit
+      TAKE_PROFIT_WEBHOOK_SECRET: Zzzsyzxl999888777666Zzzsyzxl
+    depends_on:
+      - freqtrade
+      - riskserver
+    ports:
+      - "9991:9991"
+    volumes:
+      - type: bind
+        source: ./data
+        target: /data
+      - type: bind
+        source: ./configs
+        target: /app/configs
+        read_only: true
+      - type: bind
+        source: ./prompts
+        target: /app/prompts
+        read_only: true
+
+  freqtrade:
+    image: freqtradeorg/freqtrade:stable
+    depends_on:
+      - riskserver
+    environment:
+      BRALE_RISK_DB: /freqtrade/shared/trade_risk.db
+      BRALE_RISK_REFRESH: "2"
+    command: >
+      trade
+      --logfile /freqtrade/user_data/logs/freqtrade.log
+      --db-url sqlite:////freqtrade/user_data/tradesv3.sqlite
+      --config /freqtrade/user_data/config.json
+      --strategy BraleSharedStrategy
+    ports:
+      - "8080:8080"
+    volumes:
+      - type: bind
+        source: ./data/freqtrade/user_data
+        target: /freqtrade/user_data
+      - type: bind
+        source: ./configs/user_data/freqtrade-config.json
+        target: /freqtrade/user_data/config.json
+        read_only: true
+      - type: bind
+        source: ./configs/user_data/brale_shared_strategy.py
+        target: /freqtrade/user_data/strategies/brale_shared_strategy.py
+        read_only: true
+      - type: bind
+        source: ./data
+        target: /freqtrade/shared
+
+  riskserver:
+    build:
+      context: .
+      dockerfile: Dockerfile.riskserver
+    environment:
+      BRALE_RISK_DB: /freqtrade/shared/trade_risk.db
+      RISK_SERVER_HOST: 0.0.0.0
+      RISK_SERVER_PORT: "9000"
+      RISK_SERVER_SECRET: Zzzsyzxl999888777666Zzzsyzxl
+    ports:
+      - "9000:9000"
+    volumes:
+      - type: bind
+        source: ./configs/risk_server.py
+        target: /app/risk_server.py
+        read_only: true
+      - type: bind
+        source: ./data
+        target: /freqtrade/shared

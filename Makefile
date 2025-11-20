@@ -9,6 +9,12 @@ BIN := $(BIN_DIR)/brale
 # 配置文件路径（可在命令行覆盖：make run BRALE_CONFIG=...）
 BRALE_CONFIG ?= ./configs/config.toml
 
+.PHONY: docker-build docker-up docker-down docker-logs docker-deploy init-env run-risk run-freq run-brale
+DOCKER_COMPOSE ?= docker compose
+DEPLOY_HOST ?= user@server
+DEPLOY_PATH ?= /opt/brale
+SECRET := "break-a-leg-lauk-helloworld"
+
 .PHONY: help tidy fmt test build run clean
 
 help:
@@ -19,6 +25,9 @@ help:
 	@echo "  make build  - 构建可执行文件到 $(BIN)"
 	@echo "  make run    - 运行 Brale（默认使用 $(BRALE_CONFIG)）"
 	@echo "  make clean  - 清理构建产物 $(BIN_DIR)"
+	@echo "  make run-risk - 构建并启动 riskserver 容器"
+	@echo "  make run-freq - 构建并启动 freqtrade 容器（需先启动 riskserver）"
+	@echo "  make run-brale - 构建并启动 brale 容器（需先启动 riskserver / freqtrade）"
 
 tidy:
 	go mod tidy
@@ -40,3 +49,48 @@ run:
 clean:
 	rm -rf $(BIN_DIR)
 	@echo "已清理：$(BIN_DIR)"
+
+# --- 容器化辅助 ---
+docker-build:
+	docker build -t brale:latest -f Dockerfile.brale .
+
+docker-up:
+	$(DOCKER_COMPOSE) up -d
+
+docker-down:
+	$(DOCKER_COMPOSE) down
+
+docker-logs:
+	$(DOCKER_COMPOSE) logs -f
+
+docker-deploy:
+	ssh $(DEPLOY_HOST) 'cd $(DEPLOY_PATH) && $(DOCKER_COMPOSE) pull && $(DOCKER_COMPOSE) up -d'
+
+init-env:
+	@if [ ! -f .env.brale ]; then cp .env.brale.example .env.brale; fi
+	@if [ ! -f .env.freqtrade ]; then cp .env.freqtrade.example .env.freqtrade; fi
+	@if [ -n "$(SECRET)" ]; then \
+		sed -i 's/please-change/$(SECRET)/g' .env.brale; \
+		sed -i 's/please-change/$(SECRET)/g' .env.freqtrade; \
+	fi
+
+run-risk:
+	$(DOCKER_COMPOSE) up -d --build riskserver
+
+run-freq: run-risk
+	$(DOCKER_COMPOSE) up -d --build freqtrade
+
+run-brale: run-risk run-freq
+	$(DOCKER_COMPOSE) up -d --build brale
+
+.PHONY: run-stack reset-stack
+run-stack:
+	$(MAKE) run-risk
+	$(MAKE) run-freq
+	$(MAKE) run-brale
+
+reset-stack:
+	$(DOCKER_COMPOSE) down
+	$(MAKE) run-risk
+	$(MAKE) run-freq
+	$(MAKE) run-brale

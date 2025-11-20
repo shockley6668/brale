@@ -24,6 +24,8 @@ func NormalizeAction(a string) string {
 		return "partial_close"
 	case "adjust_stop", "adjust_stop_loss", "move_stop", "move_stop_loss", "update_stop", "move_sl", "tighten_stop", "trail_stop":
 		return "adjust_stop_loss"
+	case "adjust_take_profit", "adjust_tp", "move_take_profit", "move_tp", "update_take_profit", "update_tp", "tighten_tp":
+		return "adjust_take_profit"
 	default:
 		return a
 	}

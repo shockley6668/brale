@@ -220,7 +220,7 @@ func NewApp(cfg *brcfg.Config) (*App, error) {
 			return nil, fmt.Errorf("初始化 freqtrade 执行器失败: %w", err)
 		}
 		logger.Infof("✓ Freqtrade 执行器已启用: %s", cfg.Freqtrade.APIURL)
-		freqManager = freqexec.NewManager(client, cfg.Freqtrade, cfg.AI.ActiveHorizon, decisionStore, orderRecorder)
+		freqManager = freqexec.NewManager(client, cfg.Freqtrade, cfg.AI.ActiveHorizon, decisionStore, orderRecorder, tg)
 		if synced, err := freqManager.SyncOpenPositions(ctx); err != nil {
 			logger.Warnf("同步 freqtrade 持仓失败: %v", err)
 		} else if synced > 0 {

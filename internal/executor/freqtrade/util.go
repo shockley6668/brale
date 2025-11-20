@@ -16,13 +16,27 @@ func formatFreqtradePair(symbol string) string {
 	if symbol == "" {
 		return ""
 	}
-	if strings.Contains(symbol, "/") {
-		return strings.ToUpper(symbol)
-	}
 	up := strings.ToUpper(symbol)
+	if strings.Contains(up, "/") {
+		base := up
+		quote := ""
+		if idx := strings.LastIndex(up, "/"); idx >= 0 && idx+1 < len(up) {
+			base = up[:idx]
+			quote = up[idx+1:]
+		}
+		if strings.Contains(base, ":") || strings.Contains(quote, ":") {
+			return up
+		}
+		quote = strings.TrimSpace(quote)
+		if quote == "" {
+			return up
+		}
+		return base + "/" + quote + ":" + quote
+	}
 	for _, suf := range freqtradeQuoteSuffixes {
 		if strings.HasSuffix(up, suf) && len(up) > len(suf) {
-			return up[:len(up)-len(suf)] + "/" + suf
+			base := up[:len(up)-len(suf)]
+			return base + "/" + suf + ":" + suf
 		}
 	}
 	return up
@@ -34,6 +48,9 @@ func freqtradePairToSymbol(pair string) string {
 		return ""
 	}
 	upper := strings.ToUpper(pair)
+	if idx := strings.Index(upper, ":"); idx >= 0 {
+		upper = upper[:idx]
+	}
 	return strings.ReplaceAll(upper, "/", "")
 }
 
