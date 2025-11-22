@@ -59,6 +59,7 @@ type Config struct {
 		MinRiskReward       float64 `toml:"min_risk_reward"`
 		OpenCooldownSeconds int     `toml:"open_cooldown_seconds"`
 		MaxOpensPerCycle    int     `toml:"max_opens_per_cycle"`
+		TierMinDistancePct  float64 `toml:"tier_min_distance_pct"`
 	} `toml:"advanced"`
 
 	Trading TradingConfig `toml:"trading"`
@@ -732,6 +733,9 @@ func applyDefaults(c *Config) {
 	} // 3分钟冷却
 	if c.Advanced.MaxOpensPerCycle <= 0 {
 		c.Advanced.MaxOpensPerCycle = 3
+	}
+	if c.Advanced.TierMinDistancePct <= 0 {
+		c.Advanced.TierMinDistancePct = 0.002
 	}
 
 	// Trading defaults

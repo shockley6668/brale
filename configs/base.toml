@@ -21,7 +21,7 @@ ws_batch_size = 150
 
 [ai]
 aggregation = "meta"
-decision_log_path = "data/live/decisions.db"
+decision_log_path = "/data/live/decisions.db"
 last_decision_max_age_seconds = 3600
 weights = { openai = 1.0, deepseek = 1.0, qwen = 1.0, vanchin = 1.0 }
 log_each_model = true
@@ -113,11 +113,13 @@ system_template = "prompt_default"
 # liquidity_filter_usd_m：按 OI×价格估算的最低流动性（百万 USD）。
 liquidity_filter_usd_m = 15
 # min_risk_reward：接受的最低风险回报比。
-min_risk_reward = 0.1
+min_risk_reward = 1
 # open_cooldown_seconds：同 symbol+方向开仓的冷却时间（秒）。
 open_cooldown_seconds = 180
 # max_opens_per_cycle：单次决策循环内允许的新开仓数量。
 max_opens_per_cycle = 3
+# tier_min_distance_pct：若 Tier1 距离入场价过近（按该比例）则强制与止盈价对齐。
+tier_min_distance_pct = 0.005
 
 [trading]
 # mode：资金模式（目前仅支持 static）。
@@ -125,7 +127,7 @@ mode = "static"
 # static_balance：静态账户余额（USDT），用于推导默认仓位。
 static_balance = 10000
 # max_position_pct：单笔最大仓位占比 (0,1]。
-max_position_pct = 0.05
+max_position_pct = 0.01
 # default_position_usd：若 >0 则固定仓位金额，否则按余额×占比。
 default_position_usd = 0
 # default_leverage：模型未提供 leverage 时的兜底倍数。

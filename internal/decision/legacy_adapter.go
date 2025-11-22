@@ -330,6 +330,7 @@ func (e *LegacyEngineAdapter) buildUserSummary(ctx context.Context, input Contex
 	req := `请先输出简短的【思维链】（3句，说明判断依据与结论），换行后仅输出 JSON 数组。
 	JSON 每项必须包含 symbol、action、reasoning（写出 bull_score、bear_score、ATR 语境），并遵守：
 	- action 为 open_long/open_short：返回 take_profit、stop_loss（绝对价）、leverage（2–50）以及 tiers 对象（含 tier1/2/3 target 与 ratio，ratio 省略时程序默认 33%/33%/34%）。
+    - 当当前有仓位时，action才可返回update_tiers，adjust_stop_loss，adjust_take_profit，不然不可返回。
 	- action 为 update_tiers：当结构或波动变化需要调整三段目标时输出，并在 tiers 对象内给出新的 target/ratio；**每个被调整的段必须同时提供 target 与 ratio**，且仅能修改未完成 (tier*_done=0) 的段位，已标注 ✅ 的段不可更改。
 	- action 为 adjust_stop_loss/adjust_take_profit：必须同时返回新的 stop_loss 与 take_profit，否则视为无效。
     - 多个动作须按逻辑顺序列出，例如先 update_tiers 再 adjust_*。
@@ -724,7 +725,7 @@ func isOpenAction(action string) bool {
 }
 
 func (e *LegacyEngineAdapter) appendCurrentPositions(b *strings.Builder, account AccountSnapshot, positions []PositionSnapshot) {
-	if len(positions) == 0 || b == nil {
+	if b == nil {
 		return
 	}
 	if account.Total > 0 || account.Available > 0 {
@@ -746,6 +747,10 @@ func (e *LegacyEngineAdapter) appendCurrentPositions(b *strings.Builder, account
 		b.WriteString(line + "\n")
 	}
 	b.WriteString("\n## 当前持仓\n")
+	if len(positions) == 0 {
+		b.WriteString("- 当前无持仓 (0)，请勿返回 close_* / update_tiers / adjust_* 指令。\n")
+		return
+	}
 	for _, pos := range positions {
 		line := fmt.Sprintf("- %s %s entry=%.4f",
 			strings.ToUpper(pos.Symbol), strings.ToUpper(pos.Side), pos.EntryPrice)

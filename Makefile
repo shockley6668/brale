@@ -23,7 +23,7 @@ FREQTRADE_API_USER ?= lauk
 FREQTRADE_API_PASS ?= 881016
 FREQTRADE_WAIT_TIMEOUT ?= 90
 
-.PHONY: docker-build docker-up docker-down docker-logs docker-deploy init-env run-freq run-brale data-reset freqtrade-prepare freqtrade-up freqtrade-down freqtrade-logs freqtrade-wait brale-up brale-stop brale-logs brale-restart stack-up stack-down stack-restart stack-init
+.PHONY: docker-build docker-up docker-down docker-logs docker-deploy init-env run-freq run-brale data-reset freqtrade-prepare freqtrade-up freqtrade-down freqtrade-logs freqtrade-wait brale-up brale-stop brale-logs brale-restart stack-up stack-down stack-restart stack-init up
 DOCKER_COMPOSE ?= docker compose
 DEPLOY_HOST ?= user@server
 DEPLOY_PATH ?= /opt/brale
@@ -81,8 +81,6 @@ freqtrade-prepare:
 docker-build:
 	docker build -t brale:latest -f Dockerfile.brale .
 
-docker-up: stack-up
-
 docker-down:
 	$(DOCKER_COMPOSE) down
 
@@ -122,43 +120,9 @@ freqtrade-wait:
 freqtrade-down:
 	$(DOCKER_COMPOSE) stop freqtrade
 
-freqtrade-logs:
-	$(DOCKER_COMPOSE) logs -f freqtrade
-
 brale-up:
 	$(MAKE) freqtrade-up
 	$(MAKE) freqtrade-wait
 	$(DOCKER_COMPOSE) up -d brale
 
-brale-restart:
-	$(MAKE) freqtrade-up
-	$(MAKE) freqtrade-wait
-	$(DOCKER_COMPOSE) up -d --build brale
 
-brale-stop:
-	$(DOCKER_COMPOSE) stop brale
-
-brale-logs:
-	$(DOCKER_COMPOSE) logs -f brale
-
-stack-up:
-	$(MAKE) brale-up
-
-stack-down:
-	$(DOCKER_COMPOSE) down
-
-stack-restart:
-	$(MAKE) brale-restart
-
-stack-init: data-reset
-	$(MAKE) stack-up
-
-# 兼容旧目标名称
-run-freq: freqtrade-up
-
-run-brale: brale-restart
-
-.PHONY: run-stack reset-stack
-run-stack: stack-up
-
-reset-stack: stack-restart

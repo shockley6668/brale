@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -253,6 +254,7 @@ func (s *LiveService) tickDecision(ctx context.Context) error {
 					logger.Warnf("AI 决策RR校验失败，已忽略: %v | %+v", err, d)
 					continue
 				}
+				s.enforceTierDistance(&d, price)
 			}
 		}
 		if s.freqManager != nil {
@@ -313,6 +315,32 @@ func (s *LiveService) applyTradingDefaults(d *decision.Decision) {
 			d.PositionSizeUSD = size
 		}
 	}
+}
+
+func (s *LiveService) enforceTierDistance(d *decision.Decision, price float64) {
+	if s == nil || s.cfg == nil || d == nil {
+		return
+	}
+	if d.Action != "open_long" && d.Action != "open_short" {
+		return
+	}
+	if price <= 0 || d.TakeProfit <= 0 || d.Tiers == nil || d.Tiers.Tier1Target <= 0 {
+		return
+	}
+	minPct := s.cfg.Advanced.TierMinDistancePct
+	if minPct <= 0 {
+		return
+	}
+	oldT1 := d.Tiers.Tier1Target
+	diff := math.Abs(oldT1-price) / price
+	if diff >= minPct {
+		return
+	}
+	tp := d.TakeProfit
+	d.Tiers.Tier1Target = tp
+	d.Tiers.Tier2Target = tp
+	d.Tiers.Tier3Target = tp
+	logger.Infof("tier1 target %.4f 太接近价格 %.4f (%.4f%% < %.4f%%)，已将所有三段统一到止盈价 %.4f", oldT1, price, diff*100, minPct*100, tp)
 }
 
 func (s *LiveService) notifyOpen(ctx context.Context, d decision.Decision, entryPrice float64, validateIv string) {
@@ -682,11 +710,11 @@ func (s *LiveService) HandleFreqtradeWebhook(ctx context.Context, msg freqexec.W
 }
 
 // ListFreqtradePositions implements livehttp.FreqtradeWebhookHandler.
-func (s *LiveService) ListFreqtradePositions(ctx context.Context, symbol string, limit int) []freqexec.APIPosition {
+func (s *LiveService) ListFreqtradePositions(ctx context.Context, opts freqexec.PositionListOptions) []freqexec.APIPosition {
 	if s == nil || s.freqManager == nil {
 		return nil
 	}
-	positions := s.freqManager.PositionsForAPI(symbol, limit)
+	positions := s.freqManager.PositionsForAPI(ctx, opts)
 	if len(positions) == 0 {
 		return positions
 	}

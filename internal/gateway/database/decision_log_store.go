@@ -364,9 +364,14 @@ func (s *DecisionLogStore) ListDecisions(ctx context.Context, q LiveDecisionQuer
 		sb.WriteString(" AND provider_id=?")
 		args = append(args, q.Provider)
 	}
-	if q.Stage != "" {
+	stage := strings.TrimSpace(q.Stage)
+	switch stage {
+	case "":
+	case "core":
+		sb.WriteString(" AND (stage='final' OR stage='provider' OR stage LIKE 'agent:%')")
+	default:
 		sb.WriteString(" AND stage=?")
-		args = append(args, q.Stage)
+		args = append(args, stage)
 	}
 	if strings.TrimSpace(q.Symbol) != "" {
 		sb.WriteString(" AND symbols LIKE ?")

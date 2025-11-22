@@ -31,29 +31,30 @@ type TextNotifier interface {
 
 // APIPosition 用于 /api/live/freqtrade/positions 返回的数据结构。
 type APIPosition struct {
-	TradeID        int      `json:"trade_id"`
-	Symbol         string   `json:"symbol"`
-	Side           string   `json:"side"`
-	EntryPrice     float64  `json:"entry_price"`
-	Amount         float64  `json:"amount"`
-	Stake          float64  `json:"stake"`
-	Leverage       float64  `json:"leverage"`
-	OpenedAt       int64    `json:"opened_at"`
-	HoldingMs      int64    `json:"holding_ms"`
-	StopLoss       float64  `json:"stop_loss,omitempty"`
-	TakeProfit     float64  `json:"take_profit,omitempty"`
-	CurrentPrice   float64  `json:"current_price,omitempty"`
-	PnLRatio       float64  `json:"pnl_ratio,omitempty"`
-	PnLUSD         float64  `json:"pnl_usd,omitempty"`
-	RemainingRatio float64  `json:"remaining_ratio,omitempty"`
-	Tier1          TierInfo `json:"tier1"`
-	Tier2          TierInfo `json:"tier2"`
-	Tier3          TierInfo `json:"tier3"`
-	TierNotes      string   `json:"tier_notes,omitempty"`
-	Status         string   `json:"status"`
-	ClosedAt       int64    `json:"closed_at,omitempty"`
-	ExitPrice      float64  `json:"exit_price,omitempty"`
-	ExitReason     string   `json:"exit_reason,omitempty"`
+	TradeID        int       `json:"trade_id"`
+	Symbol         string    `json:"symbol"`
+	Side           string    `json:"side"`
+	EntryPrice     float64   `json:"entry_price"`
+	Amount         float64   `json:"amount"`
+	Stake          float64   `json:"stake"`
+	Leverage       float64   `json:"leverage"`
+	OpenedAt       int64     `json:"opened_at"`
+	HoldingMs      int64     `json:"holding_ms"`
+	StopLoss       float64   `json:"stop_loss,omitempty"`
+	TakeProfit     float64   `json:"take_profit,omitempty"`
+	CurrentPrice   float64   `json:"current_price,omitempty"`
+	PnLRatio       float64   `json:"pnl_ratio,omitempty"`
+	PnLUSD         float64   `json:"pnl_usd,omitempty"`
+	RemainingRatio float64   `json:"remaining_ratio,omitempty"`
+	Tier1          TierInfo  `json:"tier1"`
+	Tier2          TierInfo  `json:"tier2"`
+	Tier3          TierInfo  `json:"tier3"`
+	TierNotes      string    `json:"tier_notes,omitempty"`
+	TierLogs       []TierLog `json:"tier_logs,omitempty"`
+	Status         string    `json:"status"`
+	ClosedAt       int64     `json:"closed_at,omitempty"`
+	ExitPrice      float64   `json:"exit_price,omitempty"`
+	ExitReason     string    `json:"exit_reason,omitempty"`
 }
 
 type TierInfo struct {
@@ -77,6 +78,15 @@ type TierUpdateRequest struct {
 
 // TierLog 暴露存储层的三段式记录，供 HTTP 层响应使用。
 type TierLog = storage.TierLog
+
+// PositionListOptions 控制 PositionsForAPI 的筛选行为。
+type PositionListOptions struct {
+	Symbol      string
+	Limit       int // 限制“持仓中”列表数量
+	ClosedLimit int // 限制最近平仓的数量
+	IncludeLogs bool
+	LogsLimit   int
+}
 
 // TierPriceQuote 表示用于判断 tiers 的最新价格窗口。
 type TierPriceQuote struct {
@@ -253,6 +263,9 @@ func (m *Manager) evaluateTiers(ctx context.Context, priceFn func(symbol string)
 		return
 	}
 	for _, pos := range positions {
+		if pos.TradeID <= 0 || strings.TrimSpace(pos.Symbol) == "" {
+			continue
+		}
 		rec, ok := m.loadRiskRecord(ctx, pos.TradeID)
 		if !ok {
 			continue
@@ -400,13 +413,6 @@ func (m *Manager) close(ctx context.Context, traceID string, d decision.Decision
 		return err
 	}
 	m.logExecutor(ctx, traceID, d, tradeID, "forceexit_success", recData, nil)
-	m.notify("Freqtrade 平仓指令已执行 ✅",
-		fmt.Sprintf("交易ID: %d", tradeID),
-		fmt.Sprintf("标的: %s", strings.ToUpper(d.Symbol)),
-		fmt.Sprintf("方向: %s", strings.ToUpper(side)),
-		fmt.Sprintf("平仓比例: %.2f", clampCloseRatio(d.CloseRatio)),
-		fmt.Sprintf("Trace: %s", m.ensureTrace(traceID)),
-	)
 	partial := ratio > 0 && ratio < 1 && payload.Amount > 0
 	if !partial {
 		m.deleteTrade(d.Symbol, side)
@@ -610,7 +616,7 @@ func (m *Manager) UpdateFreqtradeTiers(ctx context.Context, req TierUpdateReques
 
 // ListTierLogs exposes tier change history for HTTP layer.
 func (m *Manager) ListTierLogs(ctx context.Context, tradeID int, limit int) ([]storage.TierLog, error) {
-	return m.loadTierLogs(ctx, tradeID)
+	return m.loadTierLogs(ctx, tradeID, limit)
 }
 
 // HandleWebhook 由 HTTP 路由调用，负责更新持仓与日志。
@@ -718,7 +724,7 @@ func (m *Manager) applyTradeSnapshot(trades []Trade, recordStore bool) int {
 
 // Positions 返回当前 freqtrade 持仓快照。
 func (m *Manager) Positions() []decision.PositionSnapshot {
-	list := m.PositionsForAPI("", 0)
+	list := m.PositionsForAPI(context.Background(), PositionListOptions{})
 	if len(list) == 0 {
 		return nil
 	}
@@ -873,29 +879,6 @@ func (m *Manager) handleExit(ctx context.Context, msg WebhookMessage, event stri
 	logger.Infof("freqtrade manager: exit trade_id=%d %s %s price=%.4f reason=%s", tradeID, symbol, side, closePrice, msg.ExitReason)
 	m.logWebhook(ctx, traceID, tradeID, symbol, event, msg)
 	m.recordOrder(ctx, msg, freqtradeAction(side, true), closePrice, parseFreqtradeTime(msg.CloseDate))
-	title := "Freqtrade 平仓完成 ✅"
-	if event != "exit_fill" {
-		title = "Freqtrade 退出事件"
-	}
-	duration := "-"
-	if !pos.OpenedAt.IsZero() {
-		end := time.Now()
-		if !pos.ClosedAt.IsZero() {
-			end = pos.ClosedAt
-		}
-		duration = end.Sub(pos.OpenedAt).Truncate(time.Second).String()
-	}
-	lines := []string{
-		fmt.Sprintf("交易ID: %d", tradeID),
-		fmt.Sprintf("标的: %s (%s)", strings.ToUpper(symbol), msg.Pair),
-		fmt.Sprintf("方向: %s", strings.ToUpper(side)),
-		fmt.Sprintf("平仓价: %s", formatPrice(closePrice)),
-		fmt.Sprintf("理由: %s", strings.TrimSpace(msg.ExitReason)),
-		fmt.Sprintf("持仓时长: %s", duration),
-		fmt.Sprintf("收益率: %.4f", pnlRatio),
-		fmt.Sprintf("Trace: %s", traceID),
-	}
-	m.notify(title, lines...)
 }
 
 func (m *Manager) handleExitCancel(ctx context.Context, msg WebhookMessage) {
@@ -975,7 +958,21 @@ func (m *Manager) logWebhook(ctx context.Context, traceID string, tradeID int, s
 	}
 }
 
-func (m *Manager) PositionsForAPI(symbol string, limit int) []APIPosition {
+func (m *Manager) PositionsForAPI(ctx context.Context, opts PositionListOptions) []APIPosition {
+	symbol := strings.ToUpper(strings.TrimSpace(opts.Symbol))
+	openLimit := opts.Limit
+	if openLimit < 0 {
+		openLimit = 0
+	}
+	closedLimit := opts.ClosedLimit
+	if closedLimit < 0 {
+		closedLimit = 0
+	}
+	logsLimit := opts.LogsLimit
+	if logsLimit <= 0 {
+		logsLimit = 20
+	}
+	includeLogs := opts.IncludeLogs
 	m.mu.Lock()
 	positions := make([]Position, 0, len(m.positions))
 	for _, pos := range m.positions {
@@ -985,9 +982,11 @@ func (m *Manager) PositionsForAPI(symbol string, limit int) []APIPosition {
 	if len(positions) == 0 {
 		return nil
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	now := time.Now()
 	list := make([]APIPosition, 0, len(positions))
-	ctx := context.Background()
 	for _, pos := range positions {
 		if symbol != "" && !strings.EqualFold(pos.Symbol, symbol) {
 			continue
@@ -1037,15 +1036,22 @@ func (m *Manager) PositionsForAPI(symbol string, limit int) []APIPosition {
 			api.PnLUSD = pos.ExitPnLUSD
 			api.RemainingRatio = 0
 		}
-		// attach tier logs summary if available
-		if logs, err := m.loadTierLogs(ctx, pos.TradeID); err == nil {
-			apiTierNotes := rec.TierNotes
-			if apiTierNotes == "" && len(logs) > 0 {
-				apiTierNotes = logs[0].Reason
+		var logs []TierLog
+		if includeLogs || rec.TierNotes == "" {
+			if fetched, err := m.loadTierLogs(ctx, pos.TradeID, logsLimit); err == nil {
+				logs = fetched
 			}
-			api.TierNotes = apiTierNotes
+		}
+		if api.TierNotes == "" && len(logs) > 0 {
+			api.TierNotes = logs[0].Reason
+		}
+		if includeLogs && len(logs) > 0 {
+			api.TierLogs = logs
 		}
 		list = append(list, api)
+	}
+	if len(list) == 0 {
+		return nil
 	}
 	sort.Slice(list, func(i, j int) bool {
 		rank := func(status string) int {
@@ -1067,8 +1073,25 @@ func (m *Manager) PositionsForAPI(symbol string, limit int) []APIPosition {
 		}
 		return list[i].OpenedAt > list[j].OpenedAt
 	})
-	if limit > 0 && len(list) > limit {
-		list = list[:limit]
+	if openLimit > 0 || closedLimit > 0 {
+		opens := make([]APIPosition, 0, len(list))
+		closeds := make([]APIPosition, 0, len(list))
+		for _, pos := range list {
+			if strings.EqualFold(pos.Status, "open") {
+				opens = append(opens, pos)
+			} else {
+				closeds = append(closeds, pos)
+			}
+		}
+		if openLimit > 0 && len(opens) > openLimit {
+			opens = opens[:openLimit]
+		}
+		if closedLimit > 0 && len(closeds) > closedLimit {
+			closeds = closeds[:closedLimit]
+		}
+		list = append(opens, closeds...)
+	} else if openLimit > 0 && len(list) > openLimit {
+		list = list[:openLimit]
 	}
 	return list
 }
@@ -1202,14 +1225,68 @@ func (m *Manager) loadRiskRecord(ctx context.Context, tradeID int) (storage.Risk
 	return rec, ok
 }
 
-func (m *Manager) loadTierLogs(ctx context.Context, tradeID int) ([]storage.TierLog, error) {
+func (m *Manager) loadTierLogs(ctx context.Context, tradeID int, limit int) ([]storage.TierLog, error) {
 	store := m.ensureRiskStore()
 	if store == nil {
 		return nil, fmt.Errorf("risk store 未初始化")
 	}
 	cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	return store.ListTierLogs(cctx, tradeID, 20)
+	if limit <= 0 {
+		limit = 20
+	}
+	return store.ListTierLogs(cctx, tradeID, limit)
+}
+
+func (m *Manager) ensureLivePositionForAuto(pos Position, rec storage.RiskRecord, reasonType string) bool {
+	symbol := strings.ToUpper(strings.TrimSpace(pos.Symbol))
+	side := strings.ToLower(strings.TrimSpace(pos.Side))
+	if pos.TradeID <= 0 || symbol == "" || side == "" {
+		m.markAutoActionSkipped(rec, reasonType, "仓位标识缺失，跳过自动执行")
+		return false
+	}
+	if pos.Closed {
+		m.markAutoActionSkipped(rec, reasonType, "仓位已平仓，跳过自动执行")
+		return false
+	}
+	if _, ok := m.lookupTrade(symbol, side); !ok {
+		m.markAutoActionSkipped(rec, reasonType, "Freqtrade 未找到对应仓位，跳过自动执行")
+		return false
+	}
+	return true
+}
+
+func (m *Manager) markAutoActionSkipped(rec storage.RiskRecord, reasonType, detail string) {
+	if rec.TradeID <= 0 {
+		return
+	}
+	status := fmt.Sprintf("%s_skipped_no_position", reasonType)
+	if rec.Status == status {
+		return
+	}
+	note := strings.TrimSpace(detail)
+	if note == "" {
+		note = "仓位不存在，跳过自动执行"
+	}
+	if prev := strings.TrimSpace(rec.TierNotes); prev != "" {
+		note = prev + " | " + note
+	}
+	rec.Status = status
+	rec.Source = fmt.Sprintf("%s_auto", reasonType)
+	rec.TierNotes = note
+	rec.RemainingRatio = 0
+	rec.Tier1Done = true
+	rec.Tier2Done = true
+	rec.Tier3Done = true
+	if strings.EqualFold(reasonType, "stop_loss") {
+		rec.StopLoss = 0
+	}
+	if strings.EqualFold(reasonType, "take_profit") {
+		rec.TakeProfit = 0
+	}
+	rec.UpdatedAt = time.Now()
+	m.recordRisk(rec)
+	logger.Infof("freqtrade manager: %s 跳过 trade_id=%d (%s)", reasonType, rec.TradeID, detail)
 }
 
 func (m *Manager) lookupAmount(ctx context.Context, tradeID int) float64 {
@@ -1626,6 +1703,9 @@ func minPositive(vals ...float64) float64 {
 }
 
 func (m *Manager) triggerTier(ctx context.Context, tierName string, price float64, pos Position, rec storage.RiskRecord) {
+	if !m.ensureLivePositionForAuto(pos, rec, tierName) {
+		return
+	}
 	if !m.beginTierExecution(pos.TradeID) {
 		return
 	}
@@ -1655,6 +1735,9 @@ func (m *Manager) finishTierExecution(tradeID int) {
 }
 
 func (m *Manager) handleTierHit(ctx context.Context, traceID, tierName string, price float64, pos Position, rec storage.RiskRecord) error {
+	if !m.ensureLivePositionForAuto(pos, rec, tierName) {
+		return nil
+	}
 	closePortion := tierRatioForName(rec, tierName)
 	if closePortion <= 0 {
 		return nil
@@ -1810,6 +1893,9 @@ func targetForName(rec storage.RiskRecord, name string) float64 {
 }
 
 func (m *Manager) forceClose(ctx context.Context, pos Position, reasonType string, price float64, rec storage.RiskRecord) {
+	if !m.ensureLivePositionForAuto(pos, rec, reasonType) {
+		return
+	}
 	if !m.beginTierExecution(pos.TradeID) {
 		return
 	}

@@ -42,7 +42,7 @@ func (r *Router) Register(group *gin.RouterGroup) {
 // FreqtradeWebhookHandler 供 LiveService 实现，以处理 freqtrade 推送。
 type FreqtradeWebhookHandler interface {
 	HandleFreqtradeWebhook(ctx context.Context, msg freqtrade.WebhookMessage) error
-	ListFreqtradePositions(ctx context.Context, symbol string, limit int) []freqtrade.APIPosition
+	ListFreqtradePositions(ctx context.Context, opts freqtrade.PositionListOptions) []freqtrade.APIPosition
 	CloseFreqtradePosition(ctx context.Context, symbol, side string, closeRatio float64) error
 	UpdateFreqtradeTiers(ctx context.Context, req freqtrade.TierUpdateRequest) error
 	ListFreqtradeTierLogs(ctx context.Context, tradeID int, limit int) ([]freqtrade.TierLog, error)
@@ -122,8 +122,32 @@ func (r *Router) handleFreqtradePositions(c *gin.Context) {
 	if limit <= 0 {
 		limit = 100
 	}
-	positions := r.FreqtradeHandler.ListFreqtradePositions(c.Request.Context(), symbol, limit)
+	historyLimit, _ := strconv.Atoi(c.DefaultQuery("history_limit", "5"))
+	if historyLimit < 0 {
+		historyLimit = 0
+	}
+	logsLimit, _ := strconv.Atoi(c.DefaultQuery("logs_limit", "20"))
+	includeLogs := parseBoolDefaultTrue(c.DefaultQuery("include_logs", "1"))
+	opts := freqtrade.PositionListOptions{
+		Symbol:      symbol,
+		Limit:       limit,
+		ClosedLimit: historyLimit,
+		IncludeLogs: includeLogs,
+		LogsLimit:   logsLimit,
+	}
+	positions := r.FreqtradeHandler.ListFreqtradePositions(c.Request.Context(), opts)
 	c.JSON(http.StatusOK, gin.H{"positions": positions})
+}
+
+func parseBoolDefaultTrue(val string) bool {
+	s := strings.TrimSpace(strings.ToLower(val))
+	if s == "" {
+		return true
+	}
+	if s == "0" || s == "false" {
+		return false
+	}
+	return true
 }
 
 type freqtradeCloseRequest struct {

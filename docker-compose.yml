@@ -12,7 +12,7 @@ services:
       - "9991:9991"
     volumes:
       - type: bind
-        source: ./data
+        source: ./data/brale
         target: /data
       - type: bind
         source: ./configs
@@ -34,9 +34,7 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - type: bind
-        source: ./data/freqtrade/user_data
-        target: /freqtrade/user_data
+      - freqtrade-user-data:/freqtrade/user_data
       - type: bind
         source: ./configs/user_data/freqtrade-config.json
         target: /freqtrade/user_data/config.json
@@ -45,3 +43,6 @@ services:
         source: ./configs/user_data/brale_shared_strategy.py
         target: /freqtrade/user_data/strategies/brale_shared_strategy.py
         read_only: true
+
+volumes:
+  freqtrade-user-data:

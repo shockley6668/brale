@@ -10,9 +10,10 @@ const App = {
       hasNext: false,
       symbolFilter: '',
       symbolInput: '',
-      stageFilter: 'decision',
+      stageFilter: 'core',
       stageOptions: [
-        { value: 'decision', label: '只看决策' },
+        { value: 'core', label: '核心阶段 (Agent + Provider)' },
+        { value: 'decision', label: '仅最终决策' },
         { value: 'provider', label: '仅模型阶段' },
         { value: 'executor', label: '仅执行器' },
         { value: 'freqtrade', label: '仅 Freqtrade' },
@@ -28,6 +29,7 @@ const App = {
       savingTier: {},
       tierLogs: {},
       tierLogsLoading: {},
+      historyLimit: 5,
     };
   },
   mounted() {
@@ -48,6 +50,14 @@ const App = {
     openPositionCount() {
       if (!Array.isArray(this.positions)) return 0;
       return this.positions.filter((pos) => !this.isClosed(pos)).length;
+    },
+    historyCount() {
+      if (!Array.isArray(this.positions)) return 0;
+      return this.positions.filter((pos) => this.isClosed(pos)).length;
+    },
+    firstHistoryIndex() {
+      if (!Array.isArray(this.positions)) return -1;
+      return this.positions.findIndex((pos) => this.isClosed(pos));
     },
   },
   methods: {
@@ -118,6 +128,8 @@ const App = {
     },
     stageQueryParam() {
       switch (this.stageFilter) {
+        case 'core':
+          return 'core';
         case 'decision':
           return 'final';
         case 'provider':
@@ -131,7 +143,12 @@ const App = {
       }
     },
     async fetchPositions() {
-      const params = new URLSearchParams({ limit: '100' });
+      const params = new URLSearchParams({
+        limit: '100',
+        history_limit: String(this.historyLimit || 5),
+        include_logs: '1',
+        logs_limit: '20',
+      });
       if (this.symbolFilter) {
         params.set('symbol', this.symbolFilter);
       }
@@ -139,7 +156,15 @@ const App = {
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
       const list = Array.isArray(data.positions) ? data.positions : [];
-      this.positions = list.filter((pos) => pos && typeof pos.trade_id === 'number');
+      const normalized = list.filter((pos) => pos && typeof pos.trade_id === 'number');
+      const nextLogs = { ...this.tierLogs };
+      normalized.forEach((pos) => {
+        if (Array.isArray(pos.tier_logs) && pos.tier_logs.length) {
+          nextLogs[pos.trade_id] = pos.tier_logs;
+        }
+      });
+      this.tierLogs = nextLogs;
+      this.positions = normalized;
       this.syncTierForms();
     },
     syncTierForms() {
@@ -292,6 +317,9 @@ const App = {
       const provider = (step.provider_id || '').trim();
       return provider ? `${stage}::${provider}` : stage;
     },
+    shouldShowHistoryDivider(idx) {
+      return this.firstHistoryIndex !== -1 && idx === this.firstHistoryIndex;
+    },
     formatTraceTitle(trace) {
       const symbols = (trace.symbols && trace.symbols.length)
         ? trace.symbols.join(', ')
@@ -371,7 +399,12 @@ const App = {
       next[id] = !next[id];
       this.tierEditors = next;
       if (next[id]) {
-        this.fetchTierLogs(pos);
+        if (Array.isArray(pos.tier_logs) && pos.tier_logs.length) {
+          this.tierLogs = { ...this.tierLogs, [id]: pos.tier_logs };
+        }
+        if (!this.isClosed(pos)) {
+          this.fetchTierLogs(pos);
+        }
       }
     },
     async saveTierConfig(pos) {
