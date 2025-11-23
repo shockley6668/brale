@@ -56,6 +56,19 @@ func (c *lastDecisionCache) Set(mem decision.DecisionMemory) {
 	c.mu.Unlock()
 }
 
+func (c *lastDecisionCache) Delete(symbol string) {
+	if c == nil {
+		return
+	}
+	sym := strings.ToUpper(strings.TrimSpace(symbol))
+	if sym == "" {
+		return
+	}
+	c.mu.Lock()
+	delete(c.data, sym)
+	c.mu.Unlock()
+}
+
 func (c *lastDecisionCache) Snapshot(now time.Time) []decision.DecisionMemory {
 	if c == nil {
 		return nil

@@ -73,8 +73,8 @@ confirm_timeframes = ["4h"]
 background_timeframes = ["1d"]
 [ai.holding_horizon_profiles.four_hour.indicators.rsi]
 # 4h 策略更保守的 RSI 阈值。
-oversold = 30
-overbought = 70
+oversold = 35
+overbought = 65
 
 [ai.holding_horizon_profiles.one_day]
 # 日线策略：1h 入场，4h/1d 确认，1w 背景。

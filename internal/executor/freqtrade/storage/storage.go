@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -54,6 +56,23 @@ type TierLog struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// TradeEvent 记录仓位关键操作的时间线。
+type TradeEvent struct {
+	ID             int64     `json:"id"`
+	TradeID        int       `json:"trade_id"`
+	Event          string    `json:"event"`
+	Detail         string    `json:"detail,omitempty"`
+	StopLoss       float64   `json:"stop_loss,omitempty"`
+	TakeProfit     float64   `json:"take_profit,omitempty"`
+	Tier1Target    float64   `json:"tier1_target,omitempty"`
+	Tier2Target    float64   `json:"tier2_target,omitempty"`
+	Tier3Target    float64   `json:"tier3_target,omitempty"`
+	RemainingRatio float64   `json:"remaining_ratio,omitempty"`
+	Source         string    `json:"source,omitempty"`
+	Extra          string    `json:"extra,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
 // Store wraps a sqlite database for risk records.
 type Store struct {
 	mu   sync.Mutex
@@ -65,6 +84,10 @@ type Store struct {
 func Open(path string) (*Store, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, fmt.Errorf("storage path 不能为空")
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, fmt.Errorf("创建存储目录失败: %w", err)
 	}
 	dsn := fmt.Sprintf("file:%s?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&cache=shared", path)
 	db, err := sql.Open("sqlite", dsn)
@@ -180,6 +203,23 @@ func ensureSchema(db *sql.DB) error {
 		tier_notes TEXT
 	);
 	CREATE INDEX IF NOT EXISTS idx_trade_risk_symbol ON trade_risk(symbol);
+	CREATE TABLE IF NOT EXISTS trade_events (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		trade_id INTEGER NOT NULL,
+		event TEXT,
+		detail TEXT,
+		stop_loss REAL,
+		take_profit REAL,
+		tier1_target REAL,
+		tier2_target REAL,
+		tier3_target REAL,
+		remaining_ratio REAL,
+		source TEXT,
+		extra TEXT,
+		created_at INTEGER NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_trade_events_trade ON trade_events(trade_id);
+	CREATE INDEX IF NOT EXISTS idx_trade_events_created ON trade_events(created_at);
 	`
 	if _, err := db.Exec(stmt); err != nil {
 		return err
@@ -352,6 +392,76 @@ func nullIfEmpty(s string) interface{} {
 		return nil
 	}
 	return s
+}
+
+// InsertEvent 追加一条仓位事件。
+func (s *Store) InsertEvent(ctx context.Context, ev TradeEvent) error {
+	s.mu.Lock()
+	db := s.db
+	s.mu.Unlock()
+	if db == nil {
+		return fmt.Errorf("storage 未初始化")
+	}
+	if ev.TradeID <= 0 {
+		return fmt.Errorf("trade_id 需>0")
+	}
+	now := ev.CreatedAt
+	if now.IsZero() {
+		now = time.Now()
+	}
+	_, err := db.ExecContext(ctx, `
+		INSERT INTO trade_events(trade_id, event, detail, stop_loss, take_profit,
+			tier1_target, tier2_target, tier3_target, remaining_ratio, source, extra, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		ev.TradeID, nullIfEmpty(ev.Event), nullIfEmpty(ev.Detail),
+		nullIfZero(ev.StopLoss), nullIfZero(ev.TakeProfit),
+		nullIfZero(ev.Tier1Target), nullIfZero(ev.Tier2Target), nullIfZero(ev.Tier3Target),
+		nullIfZero(ev.RemainingRatio), nullIfEmpty(ev.Source), nullIfEmpty(ev.Extra),
+		now.UnixMilli(),
+	)
+	return err
+}
+
+// ListEvents 返回指定 trade 的事件时间线（倒序）。
+func (s *Store) ListEvents(ctx context.Context, tradeID int, limit int) ([]TradeEvent, error) {
+	s.mu.Lock()
+	db := s.db
+	s.mu.Unlock()
+	if db == nil {
+		return nil, fmt.Errorf("storage 未初始化")
+	}
+	if tradeID <= 0 {
+		return nil, fmt.Errorf("trade_id 需>0")
+	}
+	if limit <= 0 || limit > 200 {
+		limit = 100
+	}
+	rows, err := db.QueryContext(ctx, `
+		SELECT id, event, detail, stop_loss, take_profit, tier1_target, tier2_target, tier3_target,
+		       remaining_ratio, source, extra, created_at
+		FROM trade_events
+		WHERE trade_id = ?
+		ORDER BY created_at DESC
+		LIMIT ?`, tradeID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	events := make([]TradeEvent, 0, limit)
+	for rows.Next() {
+		var ev TradeEvent
+		var created sql.NullInt64
+		if err := rows.Scan(&ev.ID, &ev.Event, &ev.Detail, &ev.StopLoss, &ev.TakeProfit, &ev.Tier1Target, &ev.Tier2Target, &ev.Tier3Target,
+			&ev.RemainingRatio, &ev.Source, &ev.Extra, &created); err != nil {
+			return nil, err
+		}
+		ev.TradeID = tradeID
+		if created.Valid {
+			ev.CreatedAt = time.UnixMilli(created.Int64)
+		}
+		events = append(events, ev)
+	}
+	return events, rows.Err()
 }
 
 // Get returns the record for a trade if present.

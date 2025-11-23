@@ -78,6 +78,7 @@ type TierUpdateRequest struct {
 
 // TierLog 暴露存储层的三段式记录，供 HTTP 层响应使用。
 type TierLog = storage.TierLog
+type TradeEvent = storage.TradeEvent
 
 // PositionListOptions 控制 PositionsForAPI 的筛选行为。
 type PositionListOptions struct {
@@ -410,6 +411,12 @@ func (m *Manager) open(ctx context.Context, traceID string, d decision.Decision)
 	}
 	m.applyTiersFromDecision(&initialRisk, d.Tiers)
 	m.recordRisk(initialRisk)
+	m.recordEvent(initialRisk, "open", "forceenter_success", map[string]any{
+		"trace_id":   m.ensureTrace(traceID),
+		"leverage":   lev,
+		"stake":      stake,
+		"entry_side": side,
+	})
 	lines := []string{
 		fmt.Sprintf("交易ID: %d", resp.TradeID),
 		fmt.Sprintf("标的: %s (%s)", strings.ToUpper(d.Symbol), pair),
@@ -557,6 +564,12 @@ func (m *Manager) adjustStopLoss(ctx context.Context, traceID string, d decision
 	}
 	copyTierState(&updatedRec, existing)
 	m.recordRisk(updatedRec)
+	m.recordEvent(updatedRec, "adjust_stop_loss", strings.TrimSpace(d.Reasoning), map[string]any{
+		"prev_stop": prevStop,
+		"new_stop":  newStop,
+		"prev_tp":   prevTP,
+		"new_tp":    newTP,
+	})
 	logger.Infof("freqtrade stop-loss 记录已更新 trade_id=%d %s stop=%.4f tp=%.4f", tradeID, d.Symbol, newStop, newTP)
 	title := "止损已更新 ✅"
 	if changedStop && changedTP {
@@ -637,6 +650,12 @@ func (m *Manager) adjustTakeProfit(ctx context.Context, traceID string, d decisi
 	}
 	copyTierState(&updatedRec, existing)
 	m.recordRisk(updatedRec)
+	m.recordEvent(updatedRec, "adjust_take_profit", strings.TrimSpace(d.Reasoning), map[string]any{
+		"prev_tp":   prevTP,
+		"new_tp":    newTP,
+		"prev_stop": prevStop,
+		"new_stop":  newStop,
+	})
 	logger.Infof("freqtrade take-profit 记录已更新 trade_id=%d %s tp=%.4f sl=%.4f", tradeID, d.Symbol, newTP, newStop)
 	title := "止盈已更新 ✅"
 	if changedTP && changedStop {
@@ -694,6 +713,18 @@ func (m *Manager) UpdateFreqtradeTiers(ctx context.Context, req TierUpdateReques
 // ListTierLogs exposes tier change history for HTTP layer.
 func (m *Manager) ListTierLogs(ctx context.Context, tradeID int, limit int) ([]storage.TierLog, error) {
 	return m.loadTierLogs(ctx, tradeID, limit)
+}
+
+// ListTradeEvents exposes the timeline of a trade for HTTP layer.
+func (m *Manager) ListTradeEvents(ctx context.Context, tradeID int, limit int) ([]storage.TradeEvent, error) {
+	store := m.ensureRiskStore()
+	if store == nil {
+		return nil, fmt.Errorf("risk store 未初始化")
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	return store.ListEvents(ctx, tradeID, limit)
 }
 
 // HandleWebhook 由 HTTP 路由调用，负责更新持仓与日志。
@@ -768,6 +799,15 @@ func (m *Manager) refreshBalance(ctx context.Context) {
 
 func (m *Manager) applyTradeSnapshot(trades []Trade, recordStore bool) int {
 	if m == nil {
+		return 0
+	}
+	if len(trades) == 0 {
+		m.mu.Lock()
+		hasCached := len(m.positions) > 0
+		m.mu.Unlock()
+		if hasCached {
+			logger.Debugf("freqtrade manager: ListTrades 返回空，保留本地持仓缓存以防误清")
+		}
 		return 0
 	}
 	openIDs := make(map[int]struct{})
@@ -1289,6 +1329,36 @@ func (m *Manager) insertTierLog(ctx context.Context, log storage.TierLog) {
 	}
 }
 
+func (m *Manager) recordEvent(rec storage.RiskRecord, eventType, detail string, extra map[string]any) {
+	store := m.ensureRiskStore()
+	if store == nil || rec.TradeID == 0 {
+		return
+	}
+	payload := storage.TradeEvent{
+		TradeID:        rec.TradeID,
+		Event:          strings.TrimSpace(eventType),
+		Detail:         strings.TrimSpace(detail),
+		StopLoss:       rec.StopLoss,
+		TakeProfit:     rec.TakeProfit,
+		Tier1Target:    rec.Tier1Target,
+		Tier2Target:    rec.Tier2Target,
+		Tier3Target:    rec.Tier3Target,
+		RemainingRatio: rec.RemainingRatio,
+		Source:         strings.TrimSpace(rec.Source),
+		CreatedAt:      time.Now(),
+	}
+	if extra != nil {
+		if buf, err := json.Marshal(extra); err == nil {
+			payload.Extra = string(buf)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := store.InsertEvent(ctx, payload); err != nil {
+		logger.Warnf("freqtrade event 记录失败 trade_id=%d event=%s: %v", rec.TradeID, eventType, err)
+	}
+}
+
 func (m *Manager) loadRiskRecord(ctx context.Context, tradeID int) (storage.RiskRecord, bool) {
 	store := m.ensureRiskStore()
 	if store == nil {
@@ -1425,6 +1495,10 @@ func (m *Manager) finalizeRiskAfterClose(tradeID int, exitReason string, exitPri
 	rec.TierNotes = appendTierNote(rec.TierNotes, fmt.Sprintf("%s 成交 %.4f", strings.ToUpper(reason), exitPrice))
 	rec.UpdatedAt = time.Now()
 	m.recordRisk(rec)
+	m.recordEvent(rec, "close", fmt.Sprintf("exit_reason=%s price=%.4f", exitReason, exitPrice), map[string]any{
+		"exit_reason": reason,
+		"exit_price":  exitPrice,
+	})
 }
 
 func pendingReasonFromStatus(status string) string {
@@ -2044,6 +2118,10 @@ func (m *Manager) handleTierHit(ctx context.Context, traceID, tierName string, p
 			logger.Warnf("tier 调整止损失败 trade_id=%d: %v", pos.TradeID, err)
 		}
 	}
+	m.recordEvent(rec, fmt.Sprintf("%s_hit", tierName), reason, map[string]any{
+		"hit_price":   price,
+		"close_ratio": closeRatio,
+	})
 	m.notifyTierHit(tierName, rec, pos, price, closePortion, oldStop)
 	return nil
 }
@@ -2158,6 +2236,9 @@ func (m *Manager) forceClose(ctx context.Context, pos Position, reasonType strin
 	rec.Tier3Done = true
 	note := fmt.Sprintf("%s 触发 %.4f", strings.ToUpper(reasonType), price)
 	m.markAutoActionPending(rec, reasonType, note)
+	m.recordEvent(rec, fmt.Sprintf("force_%s", reasonType), note, map[string]any{
+		"trigger_price": price,
+	})
 	m.notify(fmt.Sprintf("%s 已触发 ⚠️", strings.ToUpper(reasonType)),
 		fmt.Sprintf("交易ID: %d", pos.TradeID),
 		fmt.Sprintf("标的: %s", strings.ToUpper(pos.Symbol)),
@@ -2283,6 +2364,12 @@ func (m *Manager) applyTierUpdate(ctx context.Context, traceID, symbol, side str
 	}
 	rec.TierNotes = note
 	m.recordRisk(rec)
+	m.recordEvent(rec, "update_tiers", reason, map[string]any{
+		"source":    source,
+		"ignored":   ignored,
+		"request":   tiers,
+		"old_tiers": old,
+	})
 	ctxLog, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	m.logTierChange(ctxLog, tradeID, "tier1", old.Tier1Target, rec.Tier1Target, old.Tier1Ratio, rec.Tier1Ratio, reason, source)

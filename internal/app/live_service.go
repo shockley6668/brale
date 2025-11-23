@@ -487,7 +487,7 @@ func (s *LiveService) persistLastDecisions(ctx context.Context, decisions []deci
 }
 
 func (s *LiveService) filterLastDecisionSnapshot(records []decision.DecisionMemory, positions []decision.PositionSnapshot) []decision.DecisionMemory {
-	if len(records) == 0 {
+	if len(records) == 0 || len(positions) == 0 {
 		return nil
 	}
 	posMap := make(map[string]bool, len(positions))
@@ -503,11 +503,14 @@ func (s *LiveService) filterLastDecisionSnapshot(records []decision.DecisionMemo
 		if sym == "" || len(mem.Decisions) == 0 {
 			continue
 		}
+		if !posMap[sym] {
+			if s.lastDec != nil {
+				s.lastDec.Delete(sym)
+			}
+			continue
+		}
 		filtered := make([]decision.Decision, 0, len(mem.Decisions))
 		for _, d := range mem.Decisions {
-			if d.Action == "update_tiers" && !posMap[sym] {
-				continue
-			}
 			filtered = append(filtered, d)
 		}
 		if len(filtered) == 0 {
@@ -576,6 +579,18 @@ func (s *LiveService) latestPriceQuote(ctx context.Context, symbol string) freqe
 		return quote
 	}
 	last := klines[len(klines)-1]
+	ts := last.CloseTime
+	if ts == 0 {
+		ts = last.OpenTime
+	}
+	if ts > 0 {
+		const maxAge = 30 * time.Second
+		age := time.Since(time.UnixMilli(ts))
+		if age > maxAge {
+			logger.Warnf("价格回退数据过期，跳过自动触发: %s %s age=%s", symbol, interval, age.Truncate(time.Second))
+			return quote
+		}
+	}
 	quote.Last = last.Close
 	quote.High = last.High
 	quote.Low = last.Low
@@ -853,6 +868,14 @@ func (s *LiveService) ListFreqtradeTierLogs(ctx context.Context, tradeID int, li
 		return nil, fmt.Errorf("live service 未初始化")
 	}
 	return s.freqManager.ListTierLogs(ctx, tradeID, limit)
+}
+
+// ListFreqtradeEvents implements livehttp.FreqtradeWebhookHandler.
+func (s *LiveService) ListFreqtradeEvents(ctx context.Context, tradeID int, limit int) ([]freqexec.TradeEvent, error) {
+	if s == nil || s.freqManager == nil {
+		return nil, fmt.Errorf("live service 未初始化")
+	}
+	return s.freqManager.ListTradeEvents(ctx, tradeID, limit)
 }
 
 func (s *LiveService) ensureTraceID(raw string) string {

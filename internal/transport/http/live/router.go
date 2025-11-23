@@ -36,6 +36,7 @@ func (r *Router) Register(group *gin.RouterGroup) {
 		group.POST("/freqtrade/close", r.handleFreqtradeQuickClose)
 		group.POST("/freqtrade/tiers", r.handleFreqtradeUpdateTiers)
 		group.GET("/freqtrade/tier-logs", r.handleFreqtradeTierLogs)
+		group.GET("/freqtrade/events", r.handleFreqtradeEvents)
 	}
 }
 
@@ -46,6 +47,7 @@ type FreqtradeWebhookHandler interface {
 	CloseFreqtradePosition(ctx context.Context, symbol, side string, closeRatio float64) error
 	UpdateFreqtradeTiers(ctx context.Context, req freqtrade.TierUpdateRequest) error
 	ListFreqtradeTierLogs(ctx context.Context, tradeID int, limit int) ([]freqtrade.TierLog, error)
+	ListFreqtradeEvents(ctx context.Context, tradeID int, limit int) ([]freqtrade.TradeEvent, error)
 }
 
 func (r *Router) handleLiveDecisions(c *gin.Context) {
@@ -207,4 +209,23 @@ func (r *Router) handleFreqtradeTierLogs(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"logs": logs})
+}
+
+func (r *Router) handleFreqtradeEvents(c *gin.Context) {
+	if r.FreqtradeHandler == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "未配置 freqtrade 处理器"})
+		return
+	}
+	tradeID, _ := strconv.Atoi(c.DefaultQuery("trade_id", "0"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
+	if tradeID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "trade_id 必填"})
+		return
+	}
+	events, err := r.FreqtradeHandler.ListFreqtradeEvents(c.Request.Context(), tradeID, limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"events": events})
 }
