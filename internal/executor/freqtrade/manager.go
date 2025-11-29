@@ -68,6 +68,7 @@ const (
 	hitConfirmDelay          = 2 * time.Second
 	autoCloseRetryInterval   = 30 * time.Second
 	webhookContextTimeout    = 5 * time.Minute
+	pendingExitTimeout       = 10 * time.Minute
 )
 
 // Position 缓存 freqtrade 持仓信息。
@@ -267,6 +268,9 @@ func (m *Manager) handlePending(ctx context.Context, pe pendingExit, trMap map[i
 	}
 
 	if !success {
+		if time.Since(pe.RequestedAt) < pendingExitTimeout {
+			return
+		}
 		m.appendOperation(ctx, tradeID, symbol, pe.Operation, map[string]any{
 			"event_type": strings.ToUpper(pe.Kind),
 			"status":     "FAILED",
@@ -278,7 +282,7 @@ func (m *Manager) handlePending(ctx context.Context, pe pendingExit, trMap map[i
 			fmt.Sprintf("标的: %s", symbol),
 			fmt.Sprintf("事件: %s", strings.ToUpper(pe.Kind)),
 			fmt.Sprintf("触发价: %s", formatPrice(pe.TargetPrice)),
-			"仓位未变化，等待下轮检测",
+			"仓位未变化，已放弃本次触发",
 		)
 		m.popPendingExit(tradeID)
 		return

@@ -607,25 +607,25 @@ func (m *Manager) validateTierRecord(entry float64, side string, tier database.L
 	switch side {
 	case "long":
 		if enforceOffset && !(tier.StopLoss < lower) {
-			return fmt.Errorf("多单止损必须低于当前价-偏移")
+			return fmt.Errorf("多单止损必须低于当前价-偏移 (price=%.4f offset=%.4f stop=%.4f)", entry, offset, tier.StopLoss)
 		}
 		if enforceOffset {
 			if !(upper <= tier.Tier1 && tier.Tier1 <= tier.Tier2 && tier.Tier2 <= tier.Tier3) {
-				return fmt.Errorf("多单 tier 需递增且高于当前价+偏移")
+				return fmt.Errorf("多单 tier 需递增且高于当前价+偏移 (price=%.4f offset=%.4f tier1=%.4f tier2=%.4f tier3=%.4f)", entry, offset, tier.Tier1, tier.Tier2, tier.Tier3)
 			}
 		} else if !(tier.Tier1 <= tier.Tier2 && tier.Tier2 <= tier.Tier3) {
-			return fmt.Errorf("多单 tier 需递增")
+			return fmt.Errorf("多单 tier 需递增 (tier1=%.4f tier2=%.4f tier3=%.4f)", tier.Tier1, tier.Tier2, tier.Tier3)
 		}
 	case "short":
 		if enforceOffset && !(tier.StopLoss > upper) {
-			return fmt.Errorf("空单止损必须高于当前价+偏移")
+			return fmt.Errorf("空单止损必须高于当前价+偏移 (price=%.4f offset=%.4f stop=%.4f)", entry, offset, tier.StopLoss)
 		}
 		if enforceOffset {
 			if !(lower >= tier.Tier1 && tier.Tier1 >= tier.Tier2 && tier.Tier2 >= tier.Tier3) {
-				return fmt.Errorf("空单 tier 需递减且低于当前价-偏移")
+				return fmt.Errorf("空单 tier 需递减且低于当前价-偏移 (price=%.4f offset=%.4f tier1=%.4f tier2=%.4f tier3=%.4f)", entry, offset, tier.Tier1, tier.Tier2, tier.Tier3)
 			}
 		} else if !(tier.Tier1 >= tier.Tier2 && tier.Tier2 >= tier.Tier3) {
-			return fmt.Errorf("空单 tier 需递减")
+			return fmt.Errorf("空单 tier 需递减 (tier1=%.4f tier2=%.4f tier3=%.4f)", tier.Tier1, tier.Tier2, tier.Tier3)
 		}
 	default:
 		return fmt.Errorf("未知方向: %s", side)
