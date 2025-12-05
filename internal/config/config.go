@@ -10,34 +10,62 @@ import (
 )
 
 const (
-	defaultAppEnv            = "dev"                                          // config: app.env
-	defaultAppLogLevel       = "info"                                         // config: app.log_level
-	defaultAppHTTPAddr       = ":9991"                                        // config: app.http_addr
-	defaultAppLogPath        = "/data/logs/brale-live.log"                    // config: app.log_path
-	defaultAppLLMLogPath     = "/data/logs/brale-llm.log"                     // config: app.llm_log_path
-	defaultSymbolsProvider   = "default"                                      // config: symbols.provider
-	defaultKlineMaxCached    = 300                                            // config: kline.max_cached
-	defaultMarketName        = "binance"                                      // config: market.sources.name
-	defaultMarketREST        = "https://fapi.binance.com"                     // config: market.sources.rest_base_url
-	defaultAIAggregation     = "meta"                                         // config: ai.aggregation
-	defaultAIDecisionLog     = "/data/live/decisions.db"                      // config: ai.decision_log_path
-	defaultAIDecisionAge     = 3600                                           // config: ai.last_decision_max_age_seconds
-	defaultAIDecisionEvery   = 600                                            // config: ai.decision_interval_seconds
-	defaultAIMultiBlocks     = 4                                              // config: ai.multi_agent.max_blocks
-	defaultMCPTimeout        = 120                                            // config: mcp.timeout_seconds
-	defaultFreqtradeAPI      = "http://freqtrade:8080/api/v1"                 // config: freqtrade.api_url
-	defaultFreqtradeStake    = 100                                            // config: freqtrade.default_stake_usd
-	defaultFreqtradeLev      = 1                                              // config: freqtrade.default_leverage
-	defaultFreqtradeTimeout  = 15                                             // config: freqtrade.timeout_seconds
-	defaultFreqtradeWebhook  = "http://brale:9991/api/live/freqtrade/webhook" // config: freqtrade.webhook_url
-	defaultFreqtradeRiskDB   = "/data/db/trade_risk.db"                       // config: freqtrade.risk_store_path
-	defaultAdvancedLiquidity = 15                                             // config: advanced.liquidity_filter_usd_m
-	defaultAdvancedRR        = 1                                              // config: advanced.min_risk_reward
-	defaultAdvancedCooldown  = 180                                            // config: advanced.open_cooldown_seconds
-	defaultAdvancedMaxOpen   = 3                                              // config: advanced.max_opens_per_cycle
-	defaultTradingMode       = "static"                                       // config: trading.mode
-	defaultTradingMaxPct     = 0.01                                           // config: trading.max_position_pct
-	defaultTradingLeverage   = 10                                             // config: trading.default_leverage
+	// defaultAppEnv 默认应用运行环境（config: app.env）
+	defaultAppEnv = "dev"
+	// defaultAppLogLevel 默认日志级别（config: app.log_level）
+	defaultAppLogLevel = "info"
+	// defaultAppHTTPAddr 默认 HTTP 监听地址（config: app.http_addr）
+	defaultAppHTTPAddr = ":9991"
+	// defaultAppLogPath 默认运行日志路径（config: app.log_path）
+	defaultAppLogPath = "/data/logs/brale-live.log"
+	// defaultAppLLMLogPath 默认 LLM 日志路径（config: app.llm_log_path）
+	defaultAppLLMLogPath = "/data/logs/brale-llm.log"
+	// defaultSymbolsProvider 默认交易对来源（config: symbols.provider）
+	defaultSymbolsProvider = "default"
+	// defaultKlineMaxCached K 线最大缓存数量（config: kline.max_cached）
+	defaultKlineMaxCached = 300
+	// defaultMarketName 默认行情源名称（config: market.sources.name）
+	defaultMarketName = "binance"
+	// defaultMarketREST 默认行情 REST 地址（config: market.sources.rest_base_url）
+	defaultMarketREST = "https://fapi.binance.com"
+	// defaultAIAggregation 默认 AI 决策聚合策略（config: ai.aggregation）
+	defaultAIAggregation = "meta"
+	// defaultAIDecisionLog 默认 AI 决策日志路径（config: ai.decision_log_path）
+	defaultAIDecisionLog = "/data/live/decisions.db"
+	// defaultAIDecisionAge 默认“最近一次 AI 决策”有效秒数（config: ai.last_decision_max_age_seconds）
+	defaultAIDecisionAge = 3600
+	// defaultAIDecisionEvery 默认 AI 决策间隔秒数（config: ai.decision_interval_seconds）
+	defaultAIDecisionEvery = 600
+	// defaultAIMultiBlocks 默认多 Agent 询问分块数（config: ai.multi_agent.max_blocks）
+	defaultAIMultiBlocks = 4
+	// defaultMCPTimeout 默认 MCP 请求超时秒数（config: mcp.timeout_seconds）
+	defaultMCPTimeout = 120
+	// defaultFreqtradeAPI 默认 freqtrade API 地址（config: freqtrade.api_url）
+	defaultFreqtradeAPI = "http://freqtrade:8080/api/v1"
+	// defaultFreqtradeStake 默认下单基准资金（config: freqtrade.default_stake_usd）
+	defaultFreqtradeStake = 100
+	// defaultFreqtradeLev 默认杠杆倍数（config: freqtrade.default_leverage）
+	defaultFreqtradeLev = 1
+	// defaultFreqtradeTimeout 默认 freqtrade 请求超时秒数（config: freqtrade.timeout_seconds）
+	defaultFreqtradeTimeout = 15
+	// defaultFreqtradeWebhook 默认 freqtrade 回调地址（config: freqtrade.webhook_url）
+	defaultFreqtradeWebhook = "http://brale:9991/api/live/freqtrade/webhook"
+	// defaultFreqtradeRiskDB 默认风控数据文件（config: freqtrade.risk_store_path）
+	defaultFreqtradeRiskDB = "/data/db/trade_risk.db"
+	// defaultAdvancedLiquidity 默认最小流动性过滤（单位百万美元）（config: advanced.liquidity_filter_usd_m）
+	defaultAdvancedLiquidity = 15
+	// defaultAdvancedRR 默认最小风险收益比（config: advanced.min_risk_reward）
+	defaultAdvancedRR = 1
+	// defaultAdvancedCooldown 默认开仓冷却秒（config: advanced.open_cooldown_seconds）
+	defaultAdvancedCooldown = 180
+	// defaultAdvancedMaxOpen 默认单周期最多可开仓次数（config: advanced.max_opens_per_cycle）
+	defaultAdvancedMaxOpen = 3
+	// defaultTradingMode 默认交易模式（config: trading.mode）
+	defaultTradingMode = "static"
+	// defaultTradingMaxPct 默认单笔最大仓位百分比（config: trading.max_position_pct）
+	defaultTradingMaxPct = 0.01
+	// defaultTradingLeverage 默认交易杠杆（config: trading.default_leverage）
+	defaultTradingLeverage = 10
 )
 
 // Config 是 Brale 的主配置载体。
