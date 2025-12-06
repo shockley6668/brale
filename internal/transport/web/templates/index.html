@@ -11,24 +11,31 @@
 </head>
 <body>
     <script type="text/x-template" id="app-template">
-        <div class="app-frame" :class="{'nav-collapsed': navCollapsed}">
-            <aside class="side-nav">
-                <div class="nav-logo">
-                    <div class="emoji">📘</div>
-                    <div>
-                        <p class="nav-label">Break A Leg</p>
-                        <h2>Live Console</h2>
+        <div class="app-frame" :class="{'is-mobile': isMobile}">
+            <header class="top-nav">
+                <div class="nav-main">
+                    <div class="nav-logo">
+                        <div class="emoji">📘</div>
+                        <div>
+                            <p class="nav-label">Break A Leg</p>
+                            <h2>Live Console</h2>
+                        </div>
                     </div>
-                </div>
-                <div class="nav-links">
+                    <div class="nav-meta">无鉴权 · 实盘 API</div>
+                    <button class="pill-btn nav-toggle" v-if="isMobile" @click="navCollapsed = !navCollapsed">
+                        [[ navCollapsed ? '展开菜单' : '收起菜单' ]]
+                    </button>
+                                </div>
+                <div class="top-nav-links" :class="{'open': !navCollapsed || !isMobile}">
                     <button class="nav-item" :class="{active: view==='desk'}" @click="switchView('desk')">Desk · 总览</button>
                     <button class="nav-item" :class="{active: view==='decisions'}" @click="switchView('decisions')">Blue Book · 决策</button>
                     <button class="nav-item" :class="{active: view==='positions'}" @click="switchView('positions')">Red Book · 仓位</button>
                     <button class="nav-item" :class="{active: view==='manualOpen'}" @click="switchView('manualOpen')">Manual · 手动开仓</button>
                     <button class="nav-item" :class="{active: view==='logs'}" @click="switchView('logs')">Logs · 实时</button>
-                </div>
-                <div class="nav-footer">无鉴权 · 实盘 API</div>
-            </aside>
+                    <div class="nav-footer muted">数据密集，谨慎操作 🛰</div>
+                                </div>
+            </header>
+            <div v-if="isMobile && !navCollapsed" class="nav-backdrop" @click="navCollapsed = true"></div>
 
             <main class="main-panel">
                 <header class="page-header">
@@ -38,7 +45,6 @@
                         <p class="muted" v-if="headline.desc">[[ headline.desc ]]</p>
                     </div>
                     <div class="actions">
-                        <button class="pill-btn" @click="navCollapsed = !navCollapsed">[[ navCollapsed ? '显示导航' : '隐藏导航' ]]</button>
                         <button class="pill-btn" @click="refreshCurrent" :disabled="loadingAny">刷新</button>
                         <button class="pill-btn primary" @click="switchView('positions')">快速查看仓位</button>
                     </div>
@@ -58,25 +64,25 @@
                             <div v-if="desk.error" class="callout error">[[ desk.error ]]</div>
                             <div class="capsule-list" v-if="desk.decisions.length">
                                 <div class="capsule-card" v-for="item in desk.decisions" :key="item.log.id" @click="openDecision(item.log.id)">
-                                    <div class="capsule-time">
-                                        <div class="time">[[ formatTime(item.log.ts) ]]</div>
-                                        <div class="date">[[ formatDate(item.log.ts) ]]</div>
-                                    </div>
-                                    <div class="capsule-body">
-                                        <div class="card-title">
-                                            <span>[[ item.log.symbols && item.log.symbols.length ? item.log.symbols.join(' / ') : '多标的' ]]</span>
-                                            <span class="badge" :class="badgeClass(item.action)">[[ item.actionLabel ]]</span>
+                                    <div class="capsule-head">
+                                        <div>
+                                            <div class="capsule-time">[[ formatTime(item.log.ts) ]]</div>
+                                            <div class="capsule-date">[[ formatDate(item.log.ts) ]]</div>
                                         </div>
-                                        <div class="card-meta">H [[ item.log.horizon || 'N/A' ]] · [[ item.stepCount ]] steps</div>
-                                        <p class="card-text">[[ item.summary ]]</p>
+                                        <span class="badge" :class="badgeClass(item.action)">[[ item.actionLabel ]]</span>
                                     </div>
-                                    <div class="text-right">
-                                        <div class="agent-dots justify-end mb-2">
-                                            <span class="agent-dot" v-for="dot in Math.min(item.providerCount,4)" :key="dot"></span>
-                                            <span v-if="item.providerCount>4" class="agent-dot" :title="'+'+(item.providerCount-4)"></span>
+                                    <div class="capsule-symbols">[[ item.log.symbols && item.log.symbols.length ? item.log.symbols.join(' / ') : '多标的' ]]</div>
+                                    <div class="card-meta">H [[ item.log.horizon || 'N/A' ]] · [[ item.stepCount ]] steps</div>
+                                    <p class="card-text">[[ item.summary ]]</p>
+                                    <div class="capsule-footer">
+                                        <div class="capsule-agents">
+                                            <div class="agent-dots">
+                                                <span class="agent-dot" v-for="dot in Math.min(item.providerCount,4)" :key="dot"></span>
+                                                <span v-if="item.providerCount>4" class="agent-dot" :title="'+'+(item.providerCount-4)"></span>
+                                            </div>
+                                            <div class="capsule-agent-count">[[ item.providerCount ]] Agents</div>
                                         </div>
-                                        <div class="text-xs text-slate-500 uppercase tracking-[0.35em]">[[ item.providerCount ]] Agents</div>
-                                        <div class="text-[11px] mt-2" :class="item.hasError ? 'text-red-500' : 'text-emerald-600'">
+                                        <div :class="['capsule-status', item.hasError ? 'danger' : 'success']">
                                             [[ item.hasError ? '⚠︎ 风控关注' : '稳态通过' ]]
                                         </div>
                                     </div>
@@ -179,25 +185,27 @@
                             <div v-if="decisions.error" class="callout error">[[ decisions.error ]]</div>
                             <div class="capsule-list" v-if="decisions.items.length">
                                 <div class="capsule-card" v-for="item in decisions.items" :key="item.log.id" @click="openDecision(item.log.id)">
-                                    <div class="capsule-time">
-                                        <div class="time">[[ formatTime(item.log.ts) ]]</div>
-                                        <div class="date">[[ formatDate(item.log.ts) ]]</div>
-                                    </div>
-                                    <div class="capsule-body">
-                                        <div class="card-title">
-                                            <span>[[ item.log.symbols && item.log.symbols.length ? item.log.symbols.join(' / ') : '多标的' ]]</span>
-                                            <span class="badge" :class="badgeClass(item.action)">[[ item.actionLabel ]]</span>
+                                    <div class="capsule-head">
+                                        <div>
+                                            <div class="capsule-time">[[ formatTime(item.log.ts) ]]</div>
+                                            <div class="capsule-date">[[ formatDate(item.log.ts) ]]</div>
                                         </div>
-                                        <div class="card-meta">H [[ item.log.horizon || 'N/A' ]] · [[ item.stepCount ]] steps</div>
-                                        <p class="card-text">[[ item.summary ]]</p>
+                                        <span class="badge" :class="badgeClass(item.action)">[[ item.actionLabel ]]</span>
                                     </div>
-                                    <div class="text-right min-w-[120px]">
-                                        <div class="agent-dots justify-end mb-2">
-                                            <span class="agent-dot" v-for="dot in Math.min(item.providerCount,4)" :key="dot"></span>
-                                            <span v-if="item.providerCount>4" class="agent-dot" :title="'+'+(item.providerCount-4)"></span>
+                                    <div class="capsule-symbols">[[ item.log.symbols && item.log.symbols.length ? item.log.symbols.join(' / ') : '多标的' ]]</div>
+                                    <div class="card-meta">H [[ item.log.horizon || 'N/A' ]] · [[ item.stepCount ]] steps</div>
+                                    <p class="card-text">[[ item.summary ]]</p>
+                                    <div class="capsule-footer">
+                                        <div class="capsule-agents">
+                                            <div class="agent-dots">
+                                                <span class="agent-dot" v-for="dot in Math.min(item.providerCount,4)" :key="dot"></span>
+                                                <span v-if="item.providerCount>4" class="agent-dot" :title="'+'+(item.providerCount-4)"></span>
+                                            </div>
+                                            <div class="capsule-agent-count">[[ item.providerCount ]] Agents</div>
                                         </div>
-                                        <div class="text-xs text-slate-500 uppercase tracking-[0.35em]">[[ item.providerCount ]] Agents</div>
-                                        <div class="text-[11px] mt-2" :class="item.hasError ? 'text-red-500' : 'text-emerald-600'">[[ item.hasError ? '⚠︎ Issues' : 'Clean pass' ]]</div>
+                                        <div :class="['capsule-status', item.hasError ? 'danger' : 'success']">
+                                            [[ item.hasError ? '⚠︎ Issues' : 'Clean pass' ]]
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -254,6 +262,14 @@
                                         <button class="tag" :class="{active: decisionFilters.stage==='final'}" @click="setStageFilter('final')">Final</button>
                                         <button class="tag" :class="{active: decisionFilters.stage==='other'}" @click="setStageFilter('other')">Other</button>
                                     </div>
+                                    <div class="prompt-toggle">
+                                        <button class="pill-btn" :class="{primary: showSystemPrompt}" @click="showSystemPrompt = !showSystemPrompt">
+                                            [[ showSystemPrompt ? '隐藏 System Prompt' : '显示 System Prompt' ]]
+                                        </button>
+                                        <button class="pill-btn" :class="{primary: showUserPrompt}" @click="showUserPrompt = !showUserPrompt">
+                                            [[ showUserPrompt ? '隐藏 User Prompt' : '显示 User Prompt' ]]
+                                        </button>
+                                    </div>
                                 </div>
                                 <div class="step-list" v-if="decisionDetail.data.trace && decisionDetail.data.trace.steps">
                                     <div class="step-card" v-for="(step, idx) in filteredDecisionSteps" :key="idx">
@@ -265,10 +281,10 @@
                                             </div>
                                             <div class="step-head-right">[[ formatDateTime(step.ts) ]]</div>
                                         </div>
-                                        <div class="step-label" v-if="(step.system_prompt || '').trim()">System Prompt</div>
-                                        <pre class="step-text" v-if="(step.system_prompt || '').trim()">[[ step.system_prompt ]]</pre>
-                                        <div class="step-label">User Prompt</div>
-                                        <pre class="step-text">[[ step.user_prompt || '—' ]]</pre>
+                                        <div class="step-label" v-if="showSystemPrompt && (step.system_prompt || '').trim()">System Prompt</div>
+                                        <pre class="step-text" v-if="showSystemPrompt && (step.system_prompt || '').trim()">[[ step.system_prompt ]]</pre>
+                                        <div class="step-label" v-if="showUserPrompt">User Prompt</div>
+                                        <pre class="step-text" v-if="showUserPrompt">[[ step.user_prompt || '—' ]]</pre>
                                         <template v-if="step.images && step.images.length">
                                             <div class="step-label">Image Attachments ([[ step.images.length ]])</div>
                                             <div class="step-images">
@@ -290,6 +306,11 @@
                                         </ul>
                                         <div class="step-error" v-if="step.error">⚠︎ [[ step.error ]]</div>
                                     </div>
+                                </div>
+                                <div class="mobile-step-toggle" v-if="stepExpandAvailable">
+                                    <button class="pill-btn" @click="expandMobileSteps = !expandMobileSteps">
+                                        [[ expandMobileSteps ? '收起全部步骤' : '展开全部步骤' ]]
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -395,7 +416,7 @@
                         <div class="callout warning">
                             <strong>无需审查：</strong>该表单用于人工信号或紧急开仓，提交后立即执行，系统仅进行基础校验（Tier 比例=100%、止损/止盈方向正确）。
                         </div>
-                        <div class="grid gap-4" style="grid-template-columns: repeat(12, minmax(0, 1fr));">
+                        <div class="grid gap-4 form-grid" style="grid-template-columns: repeat(12, minmax(0, 1fr));">
                             <label class="form-row col-span-4">
                                 <span>交易对</span>
                                 <select class="input" v-model="manualOpen.symbol">
@@ -555,7 +576,7 @@
                                     <h3>手动调整 TP/SL 与分段</h3>
                                     <div class="muted">提交后将通过 /api/live/freqtrade/tiers 更新</div>
                                 </div>
-                                <div class="grid gap-4" style="grid-template-columns: repeat(12, minmax(0, 1fr));">
+                                <div class="grid gap-4 form-grid" style="grid-template-columns: repeat(12, minmax(0, 1fr));">
                                     <label class="form-row col-span-6">
                                         <span>止盈价格</span>
                                         <input class="input" type="number" v-model.number="tierForm.take_profit" step="0.0001">

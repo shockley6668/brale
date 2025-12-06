@@ -1,5 +1,5 @@
 (() => {
-  const { createApp, ref, reactive, computed, onMounted } = Vue;
+  const { createApp, ref, reactive, computed, onMounted, onBeforeUnmount } = Vue;
 
   const fetchJSON = async (url, opts = {}) => {
     const res = await fetch(url, opts);
@@ -222,7 +222,10 @@
     setup() {
       const init = window.__APP_INIT__ || {};
       const view = ref(init.view || 'desk');
-      const navCollapsed = ref(false);
+      const isMobile = ref(typeof window !== 'undefined' ? window.innerWidth <= 768 : false);
+      const navCollapsed = ref(isMobile.value);
+      const showSystemPrompt = ref(true);
+      const showUserPrompt = ref(true);
       const defaultSymbols = ref(init.defaultSymbols || []);
 
       const desk = reactive({ decisions: [], positions: [], loading: false, error: '' });
@@ -255,7 +258,7 @@
         error: '',
       });
       const decisionDetail = reactive({ id: init.decisionId || null, data: null, loading: false, error: '' });
-      const decisionFilters = reactive({ stage: 'all', provider: '' });
+      const decisionFilters = reactive({ stage: 'provider', provider: '' });
       const positionDetail = reactive({ tradeId: init.tradeId || null, data: null, loading: false, error: '' });
       const tierForm = reactive({
         stop_loss: '',
@@ -290,6 +293,8 @@
       });
       const toast = reactive({ message: '', type: 'info' });
       const imagePreview = reactive({ visible: false, src: '', desc: '' });
+      const expandMobileSteps = ref(false);
+      const mobileStepLimit = 2;
 
       const loadingAny = computed(
         () =>
@@ -315,14 +320,7 @@
         return Array.from(set);
       });
 
-      const manualTierSum = computed(() => {
-        const r1 = Number(manualOpen.tier1_ratio) || 0;
-        const r2 = Number(manualOpen.tier2_ratio) || 0;
-        const r3 = Number(manualOpen.tier3_ratio) || 0;
-        return r1 + r2 + r3;
-      });
-
-      const filteredDecisionSteps = computed(() => {
+      const rawDecisionSteps = computed(() => {
         const steps = decisionDetail.data?.trace?.steps || [];
         const stageFilter = (decisionFilters.stage || 'all').toLowerCase();
         const provider = (decisionFilters.provider || '').trim();
@@ -332,11 +330,31 @@
           if (stageFilter === 'provider') stageOK = stage === 'provider';
           else if (stageFilter === 'agent') stageOK = stage.includes('agent');
           else if (stageFilter === 'final') stageOK = stage === 'final';
-          else if (stageFilter === 'other') stageOK = !(stage === 'provider' || stage.includes('agent') || stage === 'final');
+          else if (stageFilter === 'other')
+            stageOK = !(stage === 'provider' || stage.includes('agent') || stage === 'final');
           if (!stageOK) return false;
           if (provider && step.provider_id !== provider) return false;
           return true;
         });
+      });
+
+      const filteredDecisionSteps = computed(() => {
+        const steps = rawDecisionSteps.value;
+        if (isMobile.value && !expandMobileSteps.value && steps.length > mobileStepLimit) {
+          return steps.slice(0, mobileStepLimit);
+        }
+        return steps;
+      });
+
+      const stepExpandAvailable = computed(
+        () => isMobile.value && rawDecisionSteps.value.length > mobileStepLimit,
+      );
+
+      const manualTierSum = computed(() => {
+        const r1 = Number(manualOpen.tier1_ratio) || 0;
+        const r2 = Number(manualOpen.tier2_ratio) || 0;
+        const r3 = Number(manualOpen.tier3_ratio) || 0;
+        return r1 + r2 + r3;
       });
 
       const cleanStageText = (text) => {
@@ -497,6 +515,7 @@
 
       const switchView = (next) => {
         view.value = next;
+        if (isMobile.value) navCollapsed.value = true;
         if (next === 'desk') loadDesk();
         if (next === 'decisions') {
           loadDecisions();
@@ -553,7 +572,8 @@
         decisionDetail.loading = true;
         decisionDetail.error = '';
         decisionDetail.data = null;
-        decisionFilters.stage = 'all';
+        expandMobileSteps.value = false;
+        decisionFilters.stage = 'provider';
         decisionFilters.provider = '';
         try {
           const res = await fetchJSON(`/api/live/decisions/${id}`);
@@ -801,12 +821,34 @@
         imagePreview.desc = '';
       };
 
+      const handleResize = () => {
+        if (typeof window === 'undefined') return;
+        const mobile = window.innerWidth <= 768;
+        const changed = mobile !== isMobile.value;
+        isMobile.value = mobile;
+        if (changed) {
+          navCollapsed.value = mobile;
+        }
+      };
+
       onMounted(() => {
+        handleResize();
+        window.addEventListener('resize', handleResize);
         switchView(view.value);
+      });
+
+      onBeforeUnmount(() => {
+        if (typeof window === 'undefined') return;
+        window.removeEventListener('resize', handleResize);
       });
 
       return {
         navCollapsed,
+        isMobile,
+        showSystemPrompt,
+        showUserPrompt,
+        expandMobileSteps,
+        stepExpandAvailable,
         view,
         headline,
         desk,
@@ -861,9 +903,7 @@
         stageBadgeClass,
         setStageFilter: (val) => {
           decisionFilters.stage = val;
-        },
-        toggleNav: () => {
-          navCollapsed.value = !navCollapsed.value;
+          expandMobileSteps.value = false;
         },
         operationLabel,
         loadLogs,

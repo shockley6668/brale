@@ -129,41 +129,88 @@ a:hover {
 }
 
 .capsule-list {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 16px;
 }
 
 .capsule-card {
     border-radius: 16px;
     border: 1px solid rgba(0, 0, 0, 0.04);
-    padding: 18px 22px;
+    padding: 18px 20px;
     display: flex;
-    gap: 22px;
-    align-items: center;
+    flex-direction: column;
+    gap: 12px;
     cursor: pointer;
-    transition: background 0.2s, box-shadow 0.2s;
+    transition: background 0.2s, box-shadow 0.2s, transform 0.2s;
+    background: #fff;
+    min-height: 220px;
+    height: 100%;
 }
 
 .capsule-card:hover {
     background: #fcfbf8;
     box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.15);
+    transform: translateY(-1px);
 }
 
-.capsule-time .time {
-    font-size: 1.5rem;
+.capsule-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.capsule-time {
+    font-size: 1.35rem;
     font-weight: 600;
+    line-height: 1.2;
 }
 
-.capsule-time .date {
-    font-size: 0.78rem;
+.capsule-date {
+    font-size: 0.75rem;
     color: var(--notion-muted);
     letter-spacing: 0.2em;
     text-transform: uppercase;
 }
 
-.capsule-body {
-    flex: 1;
+.capsule-symbols {
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+.capsule-footer {
+    margin-top: auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.capsule-agents {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.capsule-agent-count {
+    font-size: 0.75rem;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    color: var(--notion-muted);
+}
+
+.capsule-status {
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.capsule-status.success {
+    color: #059669;
+}
+
+.capsule-status.danger {
+    color: #b91c1c;
 }
 
 .card-title {
@@ -212,9 +259,9 @@ a:hover {
 
 .step-list {
     margin-top: 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 16px;
 }
 
 .step-card {
@@ -223,6 +270,10 @@ a:hover {
     padding: 12px;
     background: #fdfcf9;
     overflow-wrap: anywhere;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    height: 100%;
 }
 
 .step-images {
@@ -472,6 +523,21 @@ a:hover {
     text-decoration: underline;
     text-decoration-color: var(--accent-blue);
     text-underline-offset: 6px;
+}
+
+.prompt-toggle {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 12px 0 4px;
+}
+
+.mobile-step-toggle {
+    margin-top: 12px;
+}
+
+.mobile-step-toggle .pill-btn {
+    width: 100%;
 }
 
 .pos-grid {
@@ -921,33 +987,66 @@ a:hover {
 
 /* Vue SPA layout */
 .app-frame {
-    display: grid;
-    grid-template-columns: 240px 1fr;
-    min-height: 100vh;
-    background: var(--notion-bg);
-    transition: grid-template-columns 0.25s ease;
-}
-
-.app-frame.nav-collapsed {
-    grid-template-columns: 0px 1fr;
-}
-
-.side-nav {
-    background: var(--sidebar-bg);
-    color: var(--sidebar-text);
-    padding: 32px 20px;
     display: flex;
     flex-direction: column;
-    gap: 24px;
-    transition: opacity 0.25s ease, visibility 0.25s ease, width 0.25s ease, padding 0.25s ease;
-    overflow: hidden;
+    min-height: 100vh;
+    background: var(--notion-bg);
 }
 
-.app-frame.nav-collapsed .side-nav {
-    opacity: 0;
-    visibility: hidden;
-    width: 0;
-    padding: 0;
+.top-nav {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    background: var(--sidebar-bg);
+    border-bottom: 1px solid var(--notion-border);
+    padding: 20px 32px;
+    box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.nav-main {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.nav-meta {
+    font-size: 0.78rem;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: #4b5563;
+}
+
+.nav-toggle {
+    display: none;
+}
+
+.top-nav-links {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.top-nav-links .nav-item {
+    flex: 0 0 auto;
+}
+
+.top-nav-links .nav-footer {
+    flex-basis: 100%;
+    text-align: right;
+    margin-top: 4px;
+}
+
+.nav-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.45);
+    backdrop-filter: blur(2px);
+    z-index: 30;
 }
 
 .nav-logo {
@@ -982,12 +1081,6 @@ a:hover {
     color: #4b5563;
 }
 
-.nav-links {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
 .nav-item {
     border: 1px solid rgba(31, 41, 55, 0.08);
     background: rgba(255, 255, 255, 0.75);
@@ -1012,15 +1105,17 @@ a:hover {
 }
 
 .nav-footer {
-    margin-top: auto;
+    margin-top: 12px;
     font-size: 0.78rem;
     color: #6b7280;
     line-height: 1.4;
 }
 
 .main-panel {
+    flex: 1 1 auto;
     padding: 36px 32px 80px;
     overflow-y: auto;
+    width: 100%;
 }
 
 .stack {
@@ -1233,22 +1328,151 @@ a:hover {
 }
 
 @media (max-width: 1080px) {
-    .app-frame {
-        grid-template-columns: 1fr;
+    .main-panel {
+        padding: 28px 20px 64px;
     }
-    .side-nav {
-        flex-direction: row;
-        align-items: center;
+    .page-header,
+    .block-header {
+        flex-direction: column;
+        align-items: flex-start;
         gap: 12px;
     }
-    .nav-links {
-        flex-direction: row;
+    .page-header .actions,
+    .block-header .actions {
+        width: 100%;
         flex-wrap: wrap;
     }
+}
+
+@media (max-width: 768px) {
+    body {
+        font-size: 0.95rem;
+    }
+    .top-nav {
+        padding: 16px 20px;
+    }
+    .nav-toggle {
+        display: inline-flex;
+    }
+    .top-nav-links {
+        display: none;
+        flex-direction: column;
+        width: 100%;
+        border: 1px solid rgba(31, 41, 55, 0.12);
+        border-radius: 16px;
+        padding: 12px;
+        background: rgba(255, 255, 255, 0.75);
+    }
+    .top-nav-links.open {
+        display: flex;
+    }
+    .top-nav-links .nav-item {
+        width: 100%;
+    }
+    .top-nav-links .nav-footer {
+        text-align: left;
+    }
     .main-panel {
-        padding: 24px 18px 60px;
+        padding: 20px 16px 60px;
+    }
+    .stack {
+        gap: 16px;
+    }
+    .notion-block,
+    .capsule-card,
+    .provider-card,
+    .pos-card,
+    .detail-card {
+        padding: 16px;
+    }
+    .capsule-symbols {
+        font-size: 0.9rem;
+    }
+    .muted {
+        font-size: 0.78rem;
+    }
+    .card-text {
+        font-size: 0.86rem;
+        line-height: 1.45;
+    }
+    .page-header .actions,
+    .block-header .actions {
+        flex-direction: column;
+    }
+    .page-header .pill-btn,
+    .block-header .pill-btn {
+        width: 100%;
+        justify-content: center;
+    }
+    .capsule-footer {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    .pos-grid,
+    .provider-grid,
+    .detail-grid {
+        grid-template-columns: 1fr;
+    }
+    .pos-card {
+        flex-direction: column;
+    }
+    .pos-card .text-right {
+        text-align: left;
+    }
+    .tier-row {
+        grid-template-columns: 1fr 1fr;
+        row-gap: 6px;
     }
     .log-row {
-        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        grid-template-columns: 1fr;
+    }
+    .input {
+        min-width: 0;
+        width: 100%;
+    }
+    .form-grid {
+        display: flex !important;
+        flex-direction: column;
+        gap: 12px !important;
+    }
+    .form-grid > * {
+        width: 100%;
+    }
+    .filter-tags {
+        gap: 8px;
+        letter-spacing: 0.2em;
+    }
+    .pill-btn {
+        width: 100%;
+    }
+}
+
+@media (max-width: 768px) and (min-width: 520px) {
+    .capsule-list {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-auto-flow: row;
+    }
+    .capsule-card {
+        min-width: auto;
+    }
+    .provider-grid,
+    .pos-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 520px) {
+    .capsule-list {
+        grid-template-columns: none;
+        grid-auto-flow: column;
+        grid-auto-columns: minmax(240px, 80vw);
+        overflow-x: auto;
+        padding-bottom: 8px;
+        scroll-snap-type: x proximity;
+        -webkit-overflow-scrolling: touch;
+    }
+    .capsule-card {
+        min-width: 0;
+        scroll-snap-align: start;
     }
 }
