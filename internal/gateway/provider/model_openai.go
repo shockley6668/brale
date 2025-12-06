@@ -52,10 +52,15 @@ func (c *OpenAIChatClient) Call(ctx context.Context, payload ChatPayload) (strin
 	userContent := buildUserContent(payload)
 	messages = append(messages, userContent)
 
+	maxTokens := payload.MaxTokens
+	if maxTokens <= 0 {
+		maxTokens = 4096
+	}
 	body := map[string]any{
 		"model":       c.Model,
 		"messages":    messages,
 		"temperature": 0.4,
+		"max_tokens":  maxTokens,
 	}
 	if payload.ExpectJSON {
 		body["response_format"] = map[string]string{"type": "json_object"}

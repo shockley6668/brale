@@ -17,6 +17,7 @@ type ChatPayload struct {
 	User       string
 	Images     []ImagePayload
 	ExpectJSON bool
+	MaxTokens  int
 }
 
 // ModelProvider 模型调用接口

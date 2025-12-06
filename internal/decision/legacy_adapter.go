@@ -85,6 +85,8 @@ func (e *LegacyEngineAdapter) Decide(ctx context.Context, input Context) (Decisi
 	sys, usr := e.ComposePrompts(ctx, input, insights)
 	visionPayloads := e.collectVisionPayloads(input.Analysis)
 
+	time.Sleep(5 * time.Second)
+
 	outs := e.collectModelOutputs(ctx, func(c context.Context, p provider.ModelProvider) ModelOutput {
 		return e.callProvider(c, p, sys, usr, visionPayloads)
 	})
