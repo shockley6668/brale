@@ -81,11 +81,61 @@ func (e *LegacyEngineAdapter) Name() string {
 
 // Decide 构建 System/User 提示词 → 调用多个模型 → 聚合 → 解析 JSON 决策
 func (e *LegacyEngineAdapter) Decide(ctx context.Context, input Context) (DecisionResult, error) {
+	order, grouped := groupAnalysisBySymbol(input.Analysis, input.Candidates)
+	// 没有可拆分或仅单币种，沿用旧逻辑
+	if len(order) <= 1 {
+		if len(order) == 1 {
+			sym := order[0]
+			input.Candidates = []string{sym}
+			input.Analysis = cloneAnalysisContexts(grouped[sym])
+		}
+		return e.decideSingle(ctx, input, true)
+	}
+
+	result := DecisionResult{
+		TraceID: fmt.Sprintf("batch-%s", uuid.NewString()),
+	}
+	blocks := make([]SymbolDecisionOutput, 0, len(order))
+	delay := true
+	for _, sym := range order {
+		symInput := input
+		symInput.Candidates = []string{sym}
+		symInput.Analysis = cloneAnalysisContexts(grouped[sym])
+		partial, err := e.decideSingle(ctx, symInput, delay)
+		if err != nil {
+			return DecisionResult{}, err
+		}
+		delay = false
+		result.Decisions = append(result.Decisions, partial.Decisions...)
+		blocks = append(blocks, SymbolDecisionOutput{
+			Symbol:      sym,
+			RawOutput:   partial.RawOutput,
+			RawJSON:     partial.RawJSON,
+			MetaSummary: partial.MetaSummary,
+			TraceID:     partial.TraceID,
+		})
+	}
+	result.SymbolResults = blocks
+	if len(blocks) == 1 {
+		// 回退到旧行为，避免前端解析差异
+		result.RawOutput = blocks[0].RawOutput
+		result.RawJSON = blocks[0].RawJSON
+		result.MetaSummary = blocks[0].MetaSummary
+		result.TraceID = blocks[0].TraceID
+	} else {
+		result.MetaSummary = mergeSymbolSummaries(blocks)
+	}
+	return result, nil
+}
+
+func (e *LegacyEngineAdapter) decideSingle(ctx context.Context, input Context, applyDelay bool) (DecisionResult, error) {
 	insights := e.runMultiAgents(ctx, input)
 	sys, usr := e.ComposePrompts(ctx, input, insights)
 	visionPayloads := e.collectVisionPayloads(input.Analysis)
 
-	time.Sleep(5 * time.Second)
+	if applyDelay {
+		time.Sleep(5 * time.Second)
+	}
 
 	outs := e.collectModelOutputs(ctx, func(c context.Context, p provider.ModelProvider) ModelOutput {
 		return e.callProvider(c, p, sys, usr, visionPayloads)
@@ -95,59 +145,12 @@ func (e *LegacyEngineAdapter) Decide(ctx context.Context, input Context) (Decisi
 		outs = orderOutputsByPreference(outs, e.ProviderPreference)
 	}
 
-	// 聚合选择一个有效输出
 	agg := e.Agg
 	if agg == nil {
 		agg = FirstWinsAggregator{}
 	}
-	// 可选：在聚合前输出每个模型的原始结果（思维链 + JSON）
 	if e.LogEachModel {
-		// 汇总表：所有模型的思维链
-		thoughts := make([]ThoughtRow, 0, len(outs))
-		// 汇总表：所有模型的结果（逐条决策）
-		results := make([]ResultRow, 0, 8)
-
-		for _, o := range outs {
-			if o.Err != nil || o.Raw == "" {
-				reason := ""
-				if o.Err != nil {
-					reason = o.Err.Error()
-				} else {
-					reason = "无输出"
-				}
-				thoughts = append(thoughts, ThoughtRow{Provider: o.ProviderID, Thought: reason, Failed: true})
-				results = append(results, ResultRow{Provider: o.ProviderID, Action: "失败", Reason: reason, Failed: true})
-				continue
-			}
-			_, start, ok := parser.ExtractJSONWithOffset(o.Raw)
-			if ok {
-				thought := strings.TrimSpace(o.Raw[:start])
-				thought = textutil.Truncate(thought, 2400)
-				thoughts = append(thoughts, ThoughtRow{Provider: o.ProviderID, Thought: thought})
-				// 逐条填充结果
-				if len(o.Parsed.Decisions) > 0 {
-					for _, d := range o.Parsed.Decisions {
-						r := ResultRow{Provider: o.ProviderID, Action: d.Action, Symbol: d.Symbol, Reason: d.Reasoning}
-						// 尽量不裁剪，但仍保底上限
-						r.Reason = textutil.Truncate(r.Reason, 3600)
-						results = append(results, r)
-					}
-				} else {
-					// 没有解析出的决策，一样标记失败
-					results = append(results, ResultRow{Provider: o.ProviderID, Action: "失败", Reason: "未解析到决策", Failed: true})
-				}
-			} else {
-				thoughts = append(thoughts, ThoughtRow{Provider: o.ProviderID, Thought: "未找到 JSON 决策数组", Failed: true})
-				results = append(results, ResultRow{Provider: o.ProviderID, Action: "失败", Reason: "未找到 JSON 决策数组", Failed: true})
-			}
-		}
-
-		// 渲染两张合并表
-		tThoughts := RenderThoughtsTable(thoughts, 0)
-		tResults := RenderResultsTable(results, 0)
-		logger.Infof("")
-		logger.InfoBlock(tThoughts)
-		logger.InfoBlock(tResults)
+		e.logModelTables(outs)
 	}
 	best, err := agg.Aggregate(ctx, outs)
 	if err != nil {
@@ -175,6 +178,49 @@ func (e *LegacyEngineAdapter) Decide(ctx context.Context, input Context) (Decisi
 	result.TraceID = traceID
 	best.Parsed.TraceID = traceID
 	return result, nil
+}
+
+func (e *LegacyEngineAdapter) logModelTables(outs []ModelOutput) {
+	thoughts := make([]ThoughtRow, 0, len(outs))
+	results := make([]ResultRow, 0, 8)
+
+	for _, o := range outs {
+		if o.Err != nil || o.Raw == "" {
+			reason := ""
+			if o.Err != nil {
+				reason = o.Err.Error()
+			} else {
+				reason = "无输出"
+			}
+			thoughts = append(thoughts, ThoughtRow{Provider: o.ProviderID, Thought: reason, Failed: true})
+			results = append(results, ResultRow{Provider: o.ProviderID, Action: "失败", Reason: reason, Failed: true})
+			continue
+		}
+		_, start, ok := parser.ExtractJSONWithOffset(o.Raw)
+		if ok {
+			thought := strings.TrimSpace(o.Raw[:start])
+			thought = textutil.Truncate(thought, 2400)
+			thoughts = append(thoughts, ThoughtRow{Provider: o.ProviderID, Thought: thought})
+			if len(o.Parsed.Decisions) > 0 {
+				for _, d := range o.Parsed.Decisions {
+					r := ResultRow{Provider: o.ProviderID, Action: d.Action, Symbol: d.Symbol, Reason: d.Reasoning}
+					r.Reason = textutil.Truncate(r.Reason, 3600)
+					results = append(results, r)
+				}
+			} else {
+				results = append(results, ResultRow{Provider: o.ProviderID, Action: "失败", Reason: "未解析到决策", Failed: true})
+			}
+		} else {
+			thoughts = append(thoughts, ThoughtRow{Provider: o.ProviderID, Thought: "未找到 JSON 决策数组", Failed: true})
+			results = append(results, ResultRow{Provider: o.ProviderID, Action: "失败", Reason: "未找到 JSON 决策数组", Failed: true})
+		}
+	}
+
+	tThoughts := RenderThoughtsTable(thoughts, 0)
+	tResults := RenderResultsTable(results, 0)
+	logger.Infof("")
+	logger.InfoBlock(tThoughts)
+	logger.InfoBlock(tResults)
 }
 
 func orderOutputsByPreference(outs []ModelOutput, pref []string) []ModelOutput {
@@ -369,18 +415,20 @@ func (e *LegacyEngineAdapter) executeAgentStage(ctx context.Context, stage agent
 	ins.ProviderID = provider.ID()
 	purpose := describeAgentPurpose(stage.name)
 	logAIInput(fmt.Sprintf("multi-agent:%s", stage.name), provider.ID(), purpose, tpl, user, nil)
+	start := time.Now()
 	out, err := e.invokeAgentProvider(ctx, provider, tpl, user)
 	logger.LogLLMResponse(fmt.Sprintf("multi-agent:%s", stage.name), provider.ID(), purpose, out)
 	if err != nil {
 		ins.Error = err.Error()
 		ins.Warned = e.emitAgentWarning(stage.name, provider.ID(), ins.Error)
-		logger.Warnf("%s agent 调用失败: %v", stage.name, err)
+		logger.Warnf("%s agent 调用失败 provider=%s elapsed=%s err=%v", stage.name, provider.ID(), time.Since(start).Truncate(time.Millisecond), err)
 		return ins
 	}
 	trimmed := strings.TrimSpace(textutil.Truncate(out, 4000))
 	if trimmed == "" {
 		ins.Error = "模型返回空文本"
 		ins.Warned = e.emitAgentWarning(stage.name, provider.ID(), ins.Error)
+		logger.Warnf("%s agent 返回空文本 provider=%s elapsed=%s", stage.name, provider.ID(), time.Since(start).Truncate(time.Millisecond))
 		return ins
 	}
 	ins.Output = trimmed
@@ -484,6 +532,7 @@ func (e *LegacyEngineAdapter) callProvider(parent context.Context, p provider.Mo
 	}
 	purpose := fmt.Sprintf("final decision (images=%d)", len(payload.Images))
 	logAIInput("main", p.ID(), purpose, payload.System, payload.User, summarizeImagePayloads(payload.Images))
+	start := time.Now()
 	raw, err := p.Call(cctx, payload)
 	logger.LogLLMResponse("main", p.ID(), purpose, raw)
 
@@ -504,12 +553,12 @@ func (e *LegacyEngineAdapter) callProvider(parent context.Context, p provider.Mo
 			if len(snippet) > 160 {
 				snippet = snippet[:160] + "..."
 			}
-			logger.Warnf("模型 %s 响应未包含 JSON 决策数组，片段: %q", p.ID(), snippet)
+			logger.Warnf("模型 %s 响应未包含 JSON 决策数组 elapsed=%s 片段=%q", p.ID(), time.Since(start).Truncate(time.Millisecond), snippet)
 			err = fmt.Errorf("未找到 JSON 决策数组")
 		}
 	}
 	if err != nil {
-		logger.Warnf("模型 %s 调用失败: %v", p.ID(), err)
+		logger.Warnf("模型 %s 调用失败 elapsed=%s err=%v", p.ID(), time.Since(start).Truncate(time.Millisecond), err)
 	}
 	return ModelOutput{
 		ProviderID:    p.ID(),
@@ -1069,4 +1118,75 @@ func parseRecentCandles(raw string, keep int) ([]market.Candle, error) {
 		candles = candles[len(candles)-keep:]
 	}
 	return candles, nil
+}
+
+func groupAnalysisBySymbol(ctxs []AnalysisContext, candidates []string) ([]string, map[string][]AnalysisContext) {
+	groups := make(map[string][]AnalysisContext)
+	order := make([]string, 0)
+	addSymbol := func(sym string) {
+		sym = normalizeSymbol(sym)
+		if sym == "" {
+			return
+		}
+		if _, ok := groups[sym]; ok {
+			return
+		}
+		groups[sym] = nil
+		order = append(order, sym)
+	}
+	for _, sym := range candidates {
+		addSymbol(sym)
+	}
+	for _, ac := range ctxs {
+		sym := normalizeSymbol(ac.Symbol)
+		if sym == "" {
+			continue
+		}
+		if _, ok := groups[sym]; !ok {
+			order = append(order, sym)
+		}
+		groups[sym] = append(groups[sym], ac)
+	}
+	if len(order) == 0 {
+		for sym := range groups {
+			order = append(order, sym)
+		}
+	}
+	return order, groups
+}
+
+func normalizeSymbol(sym string) string {
+	sym = strings.ToUpper(strings.TrimSpace(sym))
+	if sym == "" {
+		return ""
+	}
+	return sym
+}
+
+func cloneAnalysisContexts(ctxs []AnalysisContext) []AnalysisContext {
+	if len(ctxs) == 0 {
+		return nil
+	}
+	out := make([]AnalysisContext, len(ctxs))
+	copy(out, ctxs)
+	return out
+}
+
+func mergeSymbolSummaries(blocks []SymbolDecisionOutput) string {
+	if len(blocks) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(blocks))
+	for _, blk := range blocks {
+		summary := strings.TrimSpace(blk.MetaSummary)
+		if summary == "" {
+			continue
+		}
+		label := normalizeSymbol(blk.Symbol)
+		if label == "" {
+			label = "-"
+		}
+		parts = append(parts, fmt.Sprintf("[%s]\n%s", label, summary))
+	}
+	return strings.Join(parts, "\n\n")
 }

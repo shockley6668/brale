@@ -226,20 +226,33 @@ func (s *LiveService) prepareDecisionInput(ctx context.Context) (decision.Contex
 }
 
 func (s *LiveService) logModelOutput(res decision.DecisionResult) {
-	raw := strings.TrimSpace(res.RawOutput)
-	if raw == "" {
-		return
-	}
-	_, start, ok := parser.ExtractJSONWithOffset(raw)
-	if ok {
-		cot := strings.TrimSpace(raw[:start])
-		cot = text.Truncate(cot, 4800)
+	renderBlock := func(title, raw string) {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			return
+		}
+		_, start, ok := parser.ExtractJSONWithOffset(raw)
+		if ok {
+			cot := strings.TrimSpace(raw[:start])
+			cot = text.Truncate(cot, 4800)
+			logger.Infof("")
+			logger.InfoBlock(decision.RenderBlockTable(title, cot))
+			return
+		}
 		logger.Infof("")
-		logger.InfoBlock(decision.RenderBlockTable("AI[final] 思维链", cot))
+		logger.InfoBlock(decision.RenderBlockTable(title, "失败"))
+	}
+	if len(res.SymbolResults) > 0 {
+		for _, block := range res.SymbolResults {
+			title := fmt.Sprintf("AI[%s] 思维链", strings.ToUpper(strings.TrimSpace(block.Symbol)))
+			if strings.TrimSpace(block.Symbol) == "" {
+				title = "AI[final] 思维链"
+			}
+			renderBlock(title, block.RawOutput)
+		}
 		return
 	}
-	logger.Infof("")
-	logger.InfoBlock(decision.RenderBlockTable("AI[final] 思维链", "失败"))
+	renderBlock("AI[final] 思维链", res.RawOutput)
 }
 
 func (s *LiveService) notifyMetaSummary(res decision.DecisionResult) {
@@ -247,6 +260,19 @@ func (s *LiveService) notifyMetaSummary(res decision.DecisionResult) {
 		return
 	}
 	summary := strings.TrimSpace(res.MetaSummary)
+	if summary == "" && len(res.SymbolResults) > 0 {
+		chunks := make([]string, 0, len(res.SymbolResults))
+		for _, blk := range res.SymbolResults {
+			if txt := strings.TrimSpace(blk.MetaSummary); txt != "" {
+				label := strings.TrimSpace(blk.Symbol)
+				if label == "" {
+					label = "-"
+				}
+				chunks = append(chunks, fmt.Sprintf("[%s]\n%s", label, txt))
+			}
+		}
+		summary = strings.Join(chunks, "\n\n")
+	}
 	if summary == "" {
 		return
 	}
@@ -998,6 +1024,7 @@ func (s *LiveService) freqtradeHandleDecision(ctx context.Context, traceID strin
 		Decision:    d,
 		MarketPrice: marketPrice,
 	}); err != nil {
+		logger.Errorf("freqtrade: 执行失败 trace=%s symbol=%s action=%s err=%v", traceID, strings.ToUpper(strings.TrimSpace(d.Symbol)), d.Action, err)
 		return err
 	}
 	logger.Infof("freqtrade: 决策已提交 trace=%s symbol=%s action=%s", traceID, strings.ToUpper(strings.TrimSpace(d.Symbol)), d.Action)

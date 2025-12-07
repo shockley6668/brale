@@ -148,6 +148,7 @@ func (r *Router) handleDecisionByID(c *gin.Context) {
 	log, err := r.Logs.GetDecision(ctx, id)
 	if err != nil {
 		if err == sql.ErrNoRows {
+			logger.Warnf("[api] live decision detail not found ip=%s id=%d", c.ClientIP(), id)
 			c.JSON(http.StatusNotFound, gin.H{"error": "decision not found"})
 			return
 		}
@@ -201,6 +202,7 @@ func (r *Router) handleLiveOrders(c *gin.Context) {
 	symbol := c.Query("symbol")
 	orders, err := r.Logs.ListOrders(c.Request.Context(), symbol, limit)
 	if err != nil {
+		logger.Errorf("[api] live orders failed ip=%s symbol=%s limit=%d err=%v", c.ClientIP(), symbol, limit, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

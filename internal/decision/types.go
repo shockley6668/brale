@@ -63,12 +63,22 @@ func (d *Decision) UnmarshalJSON(data []byte) error {
 
 // DecisionResult AI 决策输出（可包含多币种）
 type DecisionResult struct {
-	Decisions []Decision
-	RawOutput string // 原始模型完整输出（便于调试/提取思维链）
-	RawJSON   string // 提取到的 JSON 决策数组文本
+	Decisions     []Decision
+	RawOutput     string                 // 原始模型完整输出（便于调试/提取思维链）
+	RawJSON       string                 // 提取到的 JSON 决策数组文本
+	SymbolResults []SymbolDecisionOutput // 拆分按 symbol 的原始输出
 	// MetaSummary: 当使用 meta 聚合时，记录各模型投票与理由的汇总文本（用于通知）
 	MetaSummary string
 	TraceID     string
+}
+
+// SymbolDecisionOutput 保存每个币种独立请求的输出摘要。
+type SymbolDecisionOutput struct {
+	Symbol      string `json:"symbol"`
+	RawOutput   string `json:"raw_output"`
+	RawJSON     string `json:"raw_json"`
+	MetaSummary string `json:"meta_summary"`
+	TraceID     string `json:"trace_id"`
 }
 
 // DecisionMemory 记录上一轮决策（供 Prompt 回顾）。

@@ -36,8 +36,6 @@ const (
 	defaultAIDecisionAge = 3600
 	// defaultAIDecisionEvery 默认 AI 决策间隔秒数（config: ai.decision_interval_seconds）
 	defaultAIDecisionEvery = 600
-	// defaultAIMultiBlocks 默认多 Agent 询问分块数（config: ai.multi_agent.max_blocks）
-	defaultAIMultiBlocks = 4
 	// defaultMCPTimeout 默认 MCP 请求超时秒数（config: mcp.timeout_seconds）
 	defaultMCPTimeout = 300
 	// defaultFreqtradeAPI 默认 freqtrade API 地址（config: freqtrade.api_url）
@@ -425,9 +423,6 @@ func (m *MultiAgentConfig) applyDefaults(keys keySet) {
 	}
 	if strings.TrimSpace(m.TrendProvider) == "" {
 		m.TrendProvider = "vanchin"
-	}
-	if m.MaxBlocks <= 0 {
-		m.MaxBlocks = defaultAIMultiBlocks
 	}
 }
 
@@ -1178,8 +1173,8 @@ func validate(c *Config) error {
 		if strings.TrimSpace(ma.TrendTemplate) == "" {
 			return fmt.Errorf("ai.multi_agent.trend_template 不能为空")
 		}
-		if ma.MaxBlocks <= 0 {
-			return fmt.Errorf("ai.multi_agent.max_blocks 需 > 0")
+		if ma.MaxBlocks < 0 {
+			return fmt.Errorf("ai.multi_agent.max_blocks 需 >= 0")
 		}
 	}
 	if c.Freqtrade.Enabled {

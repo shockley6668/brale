@@ -91,6 +91,8 @@ func (b *AppBuilder) Build(ctx context.Context) (*App, error) {
 	hSummary := formatHorizonSummary(cfg.AI.ActiveHorizon, horizon, hIntervals)
 	logger.Infof("[horizon]\n%s", hSummary)
 
+	applyDefaultMultiAgentBlocks(cfg, len(syms), len(hIntervals))
+
 	pm, err := b.promptManagerFn(cfg.Prompt.Dir)
 	if err != nil {
 		return nil, fmt.Errorf("加载提示词模板失败: %w", err)
@@ -222,6 +224,27 @@ func WithModelProviders(fn func(context.Context, brcfg.AIConfig, int) ([]provide
 			b.modelProvidersFn = fn
 		}
 	}
+}
+
+func applyDefaultMultiAgentBlocks(cfg *brcfg.Config, symbolCount, intervalCount int) {
+	if cfg == nil {
+		return
+	}
+	if cfg.AI.MultiAgent.MaxBlocks > 0 {
+		return
+	}
+	auto := symbolCount * intervalCount
+	if auto <= 0 {
+		if intervalCount > 0 {
+			auto = intervalCount
+		} else if symbolCount > 0 {
+			auto = symbolCount
+		} else {
+			auto = 4
+		}
+	}
+	cfg.AI.MultiAgent.MaxBlocks = auto
+	logger.Infof("✓ Multi-Agent max_blocks 未配置，自动使用 %d（%d 个币种 × %d 个周期）", auto, symbolCount, intervalCount)
 }
 
 // WithDecisionArtifacts overrides the decision artifact loader.
