@@ -40,20 +40,20 @@
 
 ```bash
 # 复制配置文件
-cp configs/config.example.toml configs/config.toml
+cp configs/config.example.yaml configs/config.yaml
 cp configs/user_data/freqtrade-config.example.json configs/user_data/freqtrade-config.json
 
 # 注意：
-# 1. 在 configs/config.toml 中填入你的 LLM API Key
+# 1. 在 configs/config.yaml 中填入你的 LLM API Key
 # 2. 在 configs/user_data/freqtrade-config.json 中配置交易所 API（或使用 dry-run 模式）
-# 3. 根据你选择的模型修改 [ai.multi_agent] [ai.provider_preference] 以及所需要的 K 线周期，或使用默认
-# 4. 修改 [freqtrade.username] [freqtrade.password] 与 freqtrade-config.json 中 [api_server.username][api_server.password] 保持一致
-# 5. 如果需要开启 Telegram 推送，请填写 freqtrade-config.json 中的 [telegram.enabled] 以及 config.toml 中的 [notify.telegram.enabled] 为 true 并填写相应的 token 和 chat_id
+# 3. 根据你选择的模型修改 config.yaml / profiles.yaml 内的 [ai.multi_agent]、[ai.provider_preference] 和周期参数
+# 4. 修改 config.yaml 内的 [freqtrade.username] [freqtrade.password] 与 freqtrade-config.json 中 [api_server.username][api_server.password] 保持一致
+# 5. 如果需要开启 Telegram 推送，请填写 freqtrade-config.json 中的 [telegram.enabled] 以及 config.yaml 中的 [notify.telegram.enabled] 为 true 并填写相应的 token 和 chat_id
 ```
 
 #### 1.1 代理访问 (Proxy)
 ```bash
-# 1. 如果你使用代理，请确保打开 config.toml 中的 [market.sources.proxy.enabled] 填写你的 HTTP 以及 SOCKS5 的链接。
+# 1. 如果你使用代理，请确保打开 config.yaml 中的 [market.sources.proxy.enabled] 填写你的 HTTP 以及 SOCKS5 的链接。
 # 2. 请打开 docker-compose.yml 中的注释（freqtrade/brale 都需要），将 HTTP_PROXY 和 HTTPS_PROXY 修改为本地的端口。
 # 3. 请修改  freqtrade-config.json 中的 [exchange.ccxt_config.proxies] 和 [exchange.ccxt_async_config.aiohttp_proxy] 为本地的端口，可直接复制 config-proxy.json 中的字段，修改端口即可。
 ```
@@ -88,6 +88,15 @@ make logs
 # 服务健康检查
 curl http://localhost:9991/healthz
 ```
+
+## 🔌 执行层（可插拔）
+
+Brale 通过“执行器”抽象下发真实订单。默认实现是 [Freqtrade](https://github.com/freqtrade/freqtrade)，但核心逻辑与它解耦：
+
+- 在 `configs/config.yaml` 中把 `freqtrade.enabled` 设为 `false`，即可只运行 AI 策略和指标，或预备接入自研执行端。
+- 执行器接口定义在 `internal/gateway/freqtrade/executor.go`，包含仓位同步、计划事件、手动分批调整等能力。任意实现满足该接口即可接入。
+- 若要更换交易引擎，实现该接口（面向新的撮合系统 / 券商 API），并通过 `app.WithFreqManager(...)` 或替换 `buildFreqManager` 注入新执行器。
+- Agent、退出计划、Telegram 通知、监控面板都只依赖这个接口，因此切换执行端无需改 AI 或中间件流水线。
 
 ## 🧩 指标体系
 

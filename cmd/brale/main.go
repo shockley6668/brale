@@ -13,12 +13,11 @@ import (
 	"brale/internal/logger"
 )
 
-// main 保持精简：加载配置并交由 app.App 运行
 func main() {
 	ctx := context.Background()
 	cfgPath := os.Getenv("BRALE_CONFIG")
 	if cfgPath == "" {
-		cfgPath = "configs/config.toml"
+		cfgPath = "configs/config.yaml"
 	}
 
 	cfg, err := brcfg.Load(cfgPath)
@@ -32,22 +31,19 @@ func main() {
 	if logFile != nil {
 		defer logFile.Close()
 	}
-	var llmLogFile *os.File
+	logger.SetLLMWriter(nil) // Default to no LLM writer
 	if cfg.App.LLMDump {
-		llmLogFile, err = setupLLMLogOutput(cfg.App.LLMLog)
+		f, err := setupLLMLogOutput(cfg.App.LLMLog)
 		if err != nil {
 			log.Fatalf("初始化 LLM 日志失败: %v", err)
 		}
-		if llmLogFile != nil {
-			defer llmLogFile.Close()
+		if f != nil {
+			defer f.Close()
 		}
-	} else {
-		logger.SetLLMWriter(nil)
 	}
 	logger.SetLevel(cfg.App.LogLevel)
 	logger.EnableLLMPayloadDump(cfg.App.LLMDump)
-	subIntervals := cfg.AI.HoldingProfiles[cfg.AI.ActiveHorizon].AllTimeframes()
-	logger.Infof("✓ 配置加载成功（环境=%s，持仓周期=%s，订阅周期=%v）", cfg.App.Env, cfg.AI.ActiveHorizon, subIntervals)
+	logger.Infof("✓ 配置加载成功（环境=%s，profiles=%s）", cfg.App.Env, cfg.AI.ProfilesPath)
 
 	app, err := app.NewApp(cfg)
 	if err != nil {

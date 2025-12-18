@@ -1,0 +1,400 @@
+## Exit Plan 模板清单（供 ai.exit_strategies_path 使用）
+#
+# 可选模板（ID → 组合说明）：
+#   - plan_combo_main：通用模板，允许 {tp_single,tp_tiers,tp_atr,sl_single,sl_tiers,sl_atr} 任意组合，至少 2 个组件且必须覆盖止盈/止损。适合作为 LLM 提示词的主模板。
+#   - plan_tp_tiers_sl_single：分段止盈 + 固定止损，最常见的三段止盈 + 一段止损。
+#   - plan_tp_tiers_sl_tiers：分段止盈 + 分段止损。
+#   - plan_tp_single_sl_single：单止盈 + 单止损，适合极简策略。
+#   - plan_tp_atr_sl_atr：ATR 追踪止盈 + ATR 追踪止损，适合趋势策略。
+#   - plan_sl_atr_tp_tiers：ATR 止损 + 分段止盈。
+#   - plan_tp_atr_sl_tiers：ATR 止盈 + 分段止损。
+#   - plan_sl_atr_tp_single：ATR 止损 + 单止盈。
+#   - plan_tp_atr_sl_single：ATR 止盈 + 单止损。
+#
+# 使用方式：
+#   1. 在 profile 的 exit_plans.allowed/combos 中引用对应 ID，LLM 只需输出其中一种模板的 children。
+#   2. 若使用 plan_combo_main，请在 prompt 中明确要求“必须包含 xx 组件”。其它模板已在 schema 内强制限定组合，LLM 可以简化输出。
+#   3. ATR 组件（tp_atr/sl_atr）需提供 atr_value、trigger_multiplier、trail_multiplier（可选 initial_stop_multiplier），并通过 mode 指定 take_profit 或 stop_loss。
+#      - atr_value 一般由 Pipeline 注入（例如最近 ATR），单位 = 绝对价格。
+#      - trigger_multiplier ∈ [1.0,5.0]、trail_multiplier >=0.5 且 < trigger_multiplier。
+#   4. 分段止盈/止损 (tp_tiers/sl_tiers) 需提供 tiers（1-3 段），每段 ratio >0 且合计 1。多头止盈 target_price 需逐段上升、止损需逐段下降（空头反向）。
+#   5. 单段组件 (tp_single/sl_single) 仍需使用 tier_stop_loss / tier_take_profit handler，并把 ratio 设置为 1。
+#
+exit_plans:
+  plan_combo_main:
+    id: plan_combo_main
+    description: >
+      分阶段止盈 + 固定止损的组合模板。根节点使用 combo_group handler，children 只能在
+      {tp_single,tp_tiers,tp_atr,sl_single,sl_tiers,sl_atr} 中选择，且必须同时包含“止盈类”与
+      “止损类”组件，最多 4 个。此模板主要用于 LLM 输出 JSON 的参考约束。
+    handler: combo_group
+    version: 3
+    prompt_hint: |
+      - 必须返回 children 数组，并注明 component / handler / params。
+      - component 只能取 {tp_single,tp_tiers,tp_atr,sl_single,sl_tiers,sl_atr}，且不可重复。
+      - handler 只能取 {tier_take_profit,tier_stop_loss,atr_trailing}。
+      - 止盈组件（tp_*）需给出 1-3 个 tiers，target_price 为绝对价且多头严格递增；ratio 相加为 1。
+      - 止损组件（sl_*）须使用 tier_stop_loss，target_price 绝对价且多头严格递减。
+      - ATR 组件需要 atr_value + trigger_multiplier + trail_multiplier，可选 initial_stop_multiplier，
+        mode 只能是 take_profit 或 stop_loss。
+      - 为防止浮点错误，可保留 2-4 位小数；禁止给出 0 或负值。
+    schema:
+      $schema: "http://json-schema.org/draft-07/schema#"
+      type: object
+      additionalProperties: false
+      required: ["children"]
+      properties:
+        final_take_profit_price:
+          type: number
+          minimum: 0
+          description: "可选，若提供则需满足多头 > entry, 空头 < entry。"
+        final_stop_loss_price:
+          type: number
+          minimum: 0
+          description: "可选，若提供则需满足多头 < entry, 空头 > entry。"
+        children:
+          type: array
+          minItems: 2
+          maxItems: 4
+          uniqueItems: false
+          items:
+            $ref: "#/definitions/childSpec"
+      definitions: &exit_plan_defs
+        childSpec:
+          type: object
+          additionalProperties: false
+          required: ["component", "handler", "params"]
+          properties:
+            component:
+              type: string
+              enum: ["tp_single", "tp_tiers", "tp_atr", "sl_single", "sl_tiers", "sl_atr"]
+            handler:
+              type: string
+              enum: ["tier_take_profit", "tier_stop_loss", "atr_trailing"]
+            params:
+              type: object
+              additionalProperties: true
+              anyOf:
+                - $ref: "#/definitions/tierTakeProfitParams"
+                - $ref: "#/definitions/tierStopLossParams"
+                - $ref: "#/definitions/atrTrailingParams"
+        tierEntry:
+          type: object
+          additionalProperties: false
+          required: ["target_price", "ratio"]
+          properties:
+            target_price:
+              type: number
+              exclusiveMinimum: 0
+            ratio:
+              type: number
+              exclusiveMinimum: 0
+              maximum: 1
+        tierTakeProfitParams:
+          type: object
+          additionalProperties: false
+          required: ["tiers"]
+          properties:
+            tiers:
+              type: array
+              minItems: 1
+              maxItems: 3
+              items:
+                $ref: "#/definitions/tierEntry"
+        tierStopLossParams:
+          type: object
+          additionalProperties: false
+          required: ["tiers"]
+          properties:
+            tiers:
+              type: array
+              minItems: 1
+              maxItems: 3
+              items:
+                $ref: "#/definitions/tierEntry"
+        atrTrailingParams:
+          type: object
+          additionalProperties: false
+          required:
+            - atr_value
+            - trigger_multiplier
+            - trail_multiplier
+          properties:
+            mode:
+              type: string
+              enum: ["take_profit", "stop_loss"]
+            atr_value:
+              type: number
+              exclusiveMinimum: 0
+            trigger_multiplier:
+              type: number
+              minimum: 1.0
+              maximum: 5.0
+            trail_multiplier:
+              type: number
+              exclusiveMinimum: 0.5
+            initial_stop_multiplier:
+              type: number
+              minimum: 1.0
+        requireTpTiers:
+          contains:
+            $ref: "#/definitions/tpTiersNode"
+        requireSlSingle:
+          contains:
+            $ref: "#/definitions/slSingleNode"
+        requireSlTiers:
+          contains:
+            $ref: "#/definitions/slTiersNode"
+        requireTpSingle:
+          contains:
+            $ref: "#/definitions/tpSingleNode"
+        requireTpAtr:
+          contains:
+            $ref: "#/definitions/tpAtrNode"
+        requireSlAtr:
+          contains:
+            $ref: "#/definitions/slAtrNode"
+        tpTiersNode: &tp_tiers_node
+          type: object
+          required: ["component", "handler"]
+          properties:
+            component:
+              const: "tp_tiers"
+            handler:
+              const: "tier_take_profit"
+        slSingleNode: &sl_single_node
+          type: object
+          required: ["component", "handler"]
+          properties:
+            component:
+              const: "sl_single"
+            handler:
+              const: "tier_stop_loss"
+        slTiersNode: &sl_tiers_node
+          type: object
+          required: ["component", "handler"]
+          properties:
+            component:
+              const: "sl_tiers"
+            handler:
+              const: "tier_stop_loss"
+        tpSingleNode: &tp_single_node
+          type: object
+          required: ["component", "handler"]
+          properties:
+            component:
+              const: "tp_single"
+            handler:
+              const: "tier_take_profit"
+        tpAtrNode: &tp_atr_node
+          type: object
+          required: ["component", "handler"]
+          properties:
+            component:
+              const: "tp_atr"
+            handler:
+              const: "atr_trailing"
+        slAtrNode: &sl_atr_node
+          type: object
+          required: ["component", "handler"]
+          properties:
+            component:
+              const: "sl_atr"
+            handler:
+              const: "atr_trailing"
+
+  plan_tp_tiers_sl_single:
+    id: plan_tp_tiers_sl_single
+    description: "分段止盈 + 固定止损：严格包含 tp_tiers 与 sl_single 两个组件。"
+    handler: combo_group
+    version: 1
+    prompt_hint: |
+      - 仅允许两段：tp_tiers(3 段以内) + sl_single(1 段)。
+      - target_price 必须为绝对价，多头止盈严格高于 entry，止损严格低于 entry。
+    schema:
+      $schema: "http://json-schema.org/draft-07/schema#"
+      type: object
+      additionalProperties: false
+      required: ["children"]
+      properties:
+        children:
+          type: array
+          minItems: 2
+          maxItems: 2
+          items:
+            $ref: "#/definitions/childSpec"
+          allOf:
+            - $ref: "#/definitions/requireTpTiers"
+            - $ref: "#/definitions/requireSlSingle"
+      definitions: *exit_plan_defs
+
+  plan_tp_tiers_sl_tiers:
+    id: plan_tp_tiers_sl_tiers
+    description: "分段止盈 + 分段止损，适合波段策略。"
+    handler: combo_group
+    version: 1
+    prompt_hint: |
+      - children 仅包含 tp_tiers 与 sl_tiers。
+      - 止盈、止损段数均 1-3，比例求和为 1。
+    schema:
+      $schema: "http://json-schema.org/draft-07/schema#"
+      type: object
+      additionalProperties: false
+      required: ["children"]
+      properties:
+        children:
+          type: array
+          minItems: 2
+          maxItems: 2
+          items:
+            $ref: "#/definitions/childSpec"
+          allOf:
+            - $ref: "#/definitions/requireTpTiers"
+            - $ref: "#/definitions/requireSlTiers"
+      definitions: *exit_plan_defs
+
+  plan_tp_single_sl_single:
+    id: plan_tp_single_sl_single
+    description: "单止盈 + 单止损，适合简化策略或低波动场景。"
+    handler: combo_group
+    version: 1
+    prompt_hint: |
+      - children 仅包含 tp_single 与 sl_single。
+      - ratio 必须填 1.0。
+    schema:
+      $schema: "http://json-schema.org/draft-07/schema#"
+      type: object
+      additionalProperties: false
+      required: ["children"]
+      properties:
+        children:
+          type: array
+          minItems: 2
+          maxItems: 2
+          items:
+            $ref: "#/definitions/childSpec"
+          allOf:
+            - $ref: "#/definitions/requireTpSingle"
+            - $ref: "#/definitions/requireSlSingle"
+      definitions: *exit_plan_defs
+
+  plan_tp_atr_sl_atr:
+    id: plan_tp_atr_sl_atr
+    description: "ATR 追踪止盈 + ATR 追踪止损，适合趋势行情。"
+    handler: combo_group
+    version: 1
+    prompt_hint: |
+      - tp_atr mode=take_profit，sl_atr mode=stop_loss。
+      - atr_value、trigger_multiplier、trail_multiplier 必填，倍数需合法。
+    schema:
+      $schema: "http://json-schema.org/draft-07/schema#"
+      type: object
+      additionalProperties: false
+      required: ["children"]
+      properties:
+        children:
+          type: array
+          minItems: 2
+          maxItems: 2
+          items:
+            $ref: "#/definitions/childSpec"
+          allOf:
+            - $ref: "#/definitions/requireTpAtr"
+            - $ref: "#/definitions/requireSlAtr"
+      definitions: *exit_plan_defs
+
+  plan_sl_atr_tp_tiers:
+    id: plan_sl_atr_tp_tiers
+    description: "ATR 止损 + 分段止盈：激进锁盈，固定化止盈段位。"
+    handler: combo_group
+    version: 1
+    prompt_hint: |
+      - children 包含 sl_atr(mode=stop_loss) 与 tp_tiers。
+    schema:
+      $schema: "http://json-schema.org/draft-07/schema#"
+      type: object
+      additionalProperties: false
+      required: ["children"]
+      properties:
+        children:
+          type: array
+          minItems: 2
+          maxItems: 2
+          items:
+            $ref: "#/definitions/childSpec"
+          allOf:
+            - $ref: "#/definitions/requireSlAtr"
+            - $ref: "#/definitions/requireTpTiers"
+      definitions: *exit_plan_defs
+
+  plan_tp_atr_sl_tiers:
+    id: plan_tp_atr_sl_tiers
+    description: "ATR 止盈 + 分段止损：趋势锁盈 + 阶梯止损。"
+    handler: combo_group
+    version: 1
+    prompt_hint: |
+      - children = tp_atr(mode=take_profit) + sl_tiers。
+    schema:
+      $schema: "http://json-schema.org/draft-07/schema#"
+      type: object
+      additionalProperties: false
+      required: ["children"]
+      properties:
+        children:
+          type: array
+          minItems: 2
+          maxItems: 2
+          items:
+            $ref: "#/definitions/childSpec"
+          allOf:
+            - $ref: "#/definitions/requireTpAtr"
+            - $ref: "#/definitions/requireSlTiers"
+      definitions: *exit_plan_defs
+
+  plan_sl_atr_tp_single:
+    id: plan_sl_atr_tp_single
+    description: "ATR 止损 + 单止盈：防守式策略。"
+    handler: combo_group
+    version: 1
+    prompt_hint: |
+      - children = sl_atr(mode=stop_loss) + tp_single。
+    schema:
+      $schema: "http://json-schema.org/draft-07/schema#"
+      type: object
+      additionalProperties: false
+      required: ["children"]
+      properties:
+        children:
+          type: array
+          minItems: 2
+          maxItems: 2
+          items:
+            $ref: "#/definitions/childSpec"
+          allOf:
+            - $ref: "#/definitions/requireSlAtr"
+            - $ref: "#/definitions/requireTpSingle"
+      definitions: *exit_plan_defs
+
+  plan_tp_atr_sl_single:
+    id: plan_tp_atr_sl_single
+    description: "ATR 止盈 + 单止损：趋势锁盈 + 固定止损。"
+    handler: combo_group
+    version: 1
+    prompt_hint: |
+      - children = tp_atr(mode=take_profit) + sl_single。
+    schema:
+      $schema: "http://json-schema.org/draft-07/schema#"
+      type: object
+      additionalProperties: false
+      required: ["children"]
+      properties:
+        children:
+          type: array
+          minItems: 2
+          maxItems: 2
+          items:
+            $ref: "#/definitions/childSpec"
+          allOf:
+            - $ref: "#/definitions/requireTpAtr"
+            - $ref: "#/definitions/requireSlSingle"
+      definitions: *exit_plan_defs

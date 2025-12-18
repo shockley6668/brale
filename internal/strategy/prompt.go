@@ -46,6 +46,15 @@ func (m *Manager) Reload() error { return m.Load() }
 // Get 获取模板内容
 func (m *Manager) Get(name string) (string, bool) { v, ok := m.cache[name]; return v, ok }
 
+// List 返回所有加载的模板名称和内容
+func (m *Manager) List() map[string]string {
+	out := make(map[string]string, len(m.cache))
+	for k, v := range m.cache {
+		out[k] = v
+	}
+	return out
+}
+
 // MustWriteSample 写入一个 default.txt（用于测试/示例）
 func MustWriteSample(dir string) error {
 	if err := os.MkdirAll(dir, 0755); err != nil {

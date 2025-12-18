@@ -12,6 +12,8 @@ import (
 
 	"brale/internal/logger"
 	"brale/internal/market"
+	symbolpkg "brale/internal/pkg/symbol"
+	"brale/internal/scheduler"
 
 	"github.com/adshao/go-binance/v2/futures"
 )
@@ -72,15 +74,18 @@ func (s *Source) FetchHistory(ctx context.Context, symbol, interval string, limi
 	if limit > maxHistoryLimit {
 		limit = maxHistoryLimit
 	}
-	symbol = strings.ToUpper(strings.TrimSpace(symbol))
+	symbol = strings.TrimSpace(symbol)
 	if symbol == "" {
 		return nil, fmt.Errorf("symbol is required")
 	}
+	// Binance requires symbols without slashes (e.g., ETHUSDT)
+	cleanSymbol := symbolpkg.Binance.ToExchange(symbol)
+
 	interval = strings.ToLower(strings.TrimSpace(interval))
 	if interval == "" {
 		return nil, fmt.Errorf("interval is required")
 	}
-	svc := s.client.NewKlinesService().Symbol(symbol).Interval(interval).Limit(limit)
+	svc := s.client.NewKlinesService().Symbol(cleanSymbol).Interval(interval).Limit(limit)
 	kls, err := svc.Do(ctx)
 	if err != nil {
 		return nil, err
@@ -102,11 +107,28 @@ func (s *Source) FetchHistory(ctx context.Context, symbol, interval string, limi
 		}
 		out = append(out, c)
 	}
+	if dur, ok := scheduler.ParseIntervalDuration(interval); ok {
+		out = scheduler.DropUnclosedBinanceKline(out, dur)
+	}
 	return out, nil
 }
 
 func (s *Source) Subscribe(ctx context.Context, symbols, intervals []string, opts market.SubscribeOptions) (<-chan market.CandleEvent, error) {
-	mapping := buildSymbolIntervals(symbols, intervals)
+	// Create mapping: CLEAN_SYMBOL -> ORIGINAL_SYMBOL
+	// This ensures we subscribe with "ETHUSDT" but return "ETH/USDT" if that's what was requested.
+	symbolMap := make(map[string]string)
+	cleanSymbols := make([]string, 0, len(symbols))
+	for _, sym := range symbols {
+		normalized := symbolpkg.Normalize(sym)
+		if normalized == "" {
+			continue
+		}
+		clean := symbolpkg.Binance.ToExchange(normalized)
+		symbolMap[clean] = normalized
+		cleanSymbols = append(cleanSymbols, clean)
+	}
+
+	mapping := buildSymbolIntervals(cleanSymbols, intervals)
 	if len(mapping) == 0 {
 		return nil, fmt.Errorf("no valid symbols or intervals for subscription")
 	}
@@ -126,30 +148,35 @@ func (s *Source) Subscribe(ctx context.Context, symbols, intervals []string, opt
 
 	go func() {
 		defer close(out)
-		s.runKlineLoop(subCtx, mapping, out, opts)
+		s.runKlineLoop(subCtx, mapping, symbolMap, out, opts)
 	}()
 	return out, nil
 }
 
-func (s *Source) SubscribeTrades(ctx context.Context, symbols []string, opts market.SubscribeOptions) (<-chan market.TradeEvent, error) {
+func (s *Source) SubscribeTrades(ctx context.Context, symbols []string, opts market.SubscribeOptions) (<-chan market.TickEvent, error) {
 	if len(symbols) == 0 {
 		return nil, fmt.Errorf("symbols are required for trade subscription")
 	}
-	targets := make([]string, 0, len(symbols))
+
+	symbolMap := make(map[string]string)
+	cleanSymbols := make([]string, 0, len(symbols))
 	for _, sym := range symbols {
-		upper := strings.ToUpper(strings.TrimSpace(sym))
-		if upper != "" {
-			targets = append(targets, upper)
+		normalized := symbolpkg.Normalize(sym)
+		if normalized != "" {
+			clean := symbolpkg.Binance.ToExchange(normalized)
+			symbolMap[clean] = normalized
+			cleanSymbols = append(cleanSymbols, clean)
 		}
 	}
-	if len(targets) == 0 {
+
+	if len(cleanSymbols) == 0 {
 		return nil, fmt.Errorf("no valid symbols for trade subscription")
 	}
 	buffer := opts.Buffer
 	if buffer <= 0 {
 		buffer = 1024
 	}
-	out := make(chan market.TradeEvent, buffer)
+	out := make(chan market.TickEvent, buffer)
 	subCtx, cancel := context.WithCancel(ctx)
 
 	s.mu.Lock()
@@ -161,12 +188,12 @@ func (s *Source) SubscribeTrades(ctx context.Context, symbols []string, opts mar
 
 	go func() {
 		defer close(out)
-		s.runTradeLoop(subCtx, targets, out, opts)
+		s.runTradeLoop(subCtx, cleanSymbols, symbolMap, out, opts)
 	}()
 	return out, nil
 }
 
-func (s *Source) runKlineLoop(ctx context.Context, mapping map[string][]string, out chan<- market.CandleEvent, opts market.SubscribeOptions) {
+func (s *Source) runKlineLoop(ctx context.Context, mapping map[string][]string, symbolMap map[string]string, out chan<- market.CandleEvent, opts market.SubscribeOptions) {
 	delay := time.Second
 	for {
 		if ctx.Err() != nil {
@@ -179,6 +206,11 @@ func (s *Source) runKlineLoop(ctx context.Context, mapping map[string][]string, 
 			if !ok {
 				return
 			}
+			// Restore original symbol format
+			if original, ok := symbolMap[ce.Symbol]; ok {
+				ce.Symbol = original
+			}
+
 			select {
 			case <-ctx.Done():
 				return
@@ -233,7 +265,7 @@ func (s *Source) runKlineLoop(ctx context.Context, mapping map[string][]string, 
 	}
 }
 
-func (s *Source) runTradeLoop(ctx context.Context, symbols []string, out chan<- market.TradeEvent, opts market.SubscribeOptions) {
+func (s *Source) runTradeLoop(ctx context.Context, symbols []string, symbolMap map[string]string, out chan<- market.TickEvent, opts market.SubscribeOptions) {
 	delay := time.Second
 	for {
 		if ctx.Err() != nil {
@@ -246,6 +278,11 @@ func (s *Source) runTradeLoop(ctx context.Context, symbols []string, out chan<- 
 			if !ok {
 				return
 			}
+			// Restore original symbol format
+			if original, ok := symbolMap[te.Symbol]; ok {
+				te.Symbol = original
+			}
+
 			select {
 			case <-ctx.Done():
 				return
@@ -382,20 +419,20 @@ func convertKlineEvent(ev *futures.WsKlineEvent) (market.CandleEvent, bool) {
 	return market.CandleEvent{Symbol: symbol, Interval: interval, Candle: c}, true
 }
 
-func convertAggTradeEvent(ev *futures.WsAggTradeEvent) (market.TradeEvent, bool) {
+func convertAggTradeEvent(ev *futures.WsAggTradeEvent) (market.TickEvent, bool) {
 	if ev == nil {
-		return market.TradeEvent{}, false
+		return market.TickEvent{}, false
 	}
 	price := parseFloat(ev.Price)
 	if price <= 0 {
-		return market.TradeEvent{}, false
+		return market.TickEvent{}, false
 	}
 	quantity := parseFloat(ev.Quantity)
 	symbol := strings.ToUpper(strings.TrimSpace(ev.Symbol))
 	if symbol == "" {
-		return market.TradeEvent{}, false
+		return market.TickEvent{}, false
 	}
-	return market.TradeEvent{
+	return market.TickEvent{
 		Symbol:    symbol,
 		Price:     price,
 		Quantity:  quantity,

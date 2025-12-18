@@ -4,13 +4,14 @@ services:
       context: .
       dockerfile: Dockerfile.brale
     environment:
-      BRALE_CONFIG: /app/configs/config.toml
+      BRALE_CONFIG: /app/configs/config.yaml
       FREQTRADE_API_URL: http://freqtrade:8080/api/v1
       #HTTP_PROXY: http://host.docker.internal:10080
       #HTTPS_PROXY: http://host.docker.internal:10080
       #NO_PROXY: localhost,127.0.0.1,brale,freqtrade
     depends_on:
-      - freqtrade
+      freqtrade:
+        condition: service_healthy
     ports:
       - "9991:9991"
     extra_hosts:
@@ -49,6 +50,12 @@ services:
       - "8080:8080"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/api/v1/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     volumes:
       - type: bind
         source: ${FREQTRADE_USERDATA_ROOT:-./running_log/freqtrade_data}

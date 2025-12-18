@@ -1,10 +1,12 @@
 package decision
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
 	brcfg "brale/internal/config"
+	"brale/internal/market"
 )
 
 // AgentInsight 记录多阶段 Agent 的文本输出。
@@ -106,30 +108,34 @@ func buildTrendAgentPrompt(ctxs []AnalysisContext, cfg brcfg.MultiAgentConfig) s
 	}
 	limit := agentBlockLimit(cfg)
 	var b strings.Builder
-	b.WriteString("# Trend CSV Windows\n")
-	b.WriteString("每个数据块包含 Date/Time(UTC), Open(O), High(H), Low(L), Close(C), Volume(V), Trades 列，按行给出最近的 K 线。\n\n")
+	b.WriteString("# Trend Structured Blocks\n")
+	b.WriteString("每个区块为 JSON：meta + structure_points(Fractal拐点) + recent_candles + global_context。\n")
+	b.WriteString("idx 为 0-based，数值越大越新；后端不输出 bullish/bearish 结论，只提供客观坐标。\n\n")
 	count := 0
+	opts := DefaultTrendCompressOptions()
 	for _, ac := range ctxs {
-		csvData := strings.TrimSpace(ac.KlineCSV)
 		raw := strings.TrimSpace(ac.KlineJSON)
 		note := strings.TrimSpace(ac.ImageNote)
-		trend := strings.TrimSpace(ac.TrendReport)
-		if csvData == "" && raw == "" && note == "" && trend == "" {
+		payload := ""
+		if raw != "" {
+			var candles []market.Candle
+			if err := json.Unmarshal([]byte(raw), &candles); err == nil && len(candles) > 0 {
+				if built, err := BuildTrendCompressedJSON(ac.Symbol, ac.Interval, candles, opts); err == nil {
+					payload = strings.TrimSpace(built)
+				}
+			}
+		}
+		if payload == "" && note == "" {
 			continue
 		}
 		b.WriteString(fmt.Sprintf("## %s %s (%s)\n", ac.Symbol, ac.Interval, ac.ForecastHorizon))
-		if csvData != "" {
-			writeCSVDataBlock(&b, buildKlineBlockTag(ac.Interval), csvData)
-		} else if raw != "" {
-			b.WriteString("Raw:\n")
-			b.WriteString(raw)
-			b.WriteString("\n")
+		if payload != "" {
+			b.WriteString("```json\n")
+			b.WriteString(payload)
+			b.WriteString("\n```\n")
 		}
 		if note != "" {
 			b.WriteString("Visual: " + note + "\n")
-		}
-		if trend != "" {
-			b.WriteString("Trend: " + trend + "\n")
 		}
 		b.WriteString("\n")
 		count++
@@ -140,7 +146,7 @@ func buildTrendAgentPrompt(ctxs []AnalysisContext, cfg brcfg.MultiAgentConfig) s
 	if count == 0 {
 		return ""
 	}
-	b.WriteString("请找出关键支撑/阻力、动量加速或背离。\n")
+	b.WriteString("请基于上述客观坐标找出关键支撑/阻力、动量加速或背离。\n")
 	return b.String()
 }
 
@@ -162,37 +168,4 @@ func formatAgentStageTitle(stage string) string {
 		}
 		return strings.ToUpper(stage[:1]) + stage[1:] + " Agent"
 	}
-}
-
-func buildKlineBlockTag(interval string) string {
-	iv := strings.ToUpper(strings.TrimSpace(interval))
-	if iv == "" {
-		return "DATA"
-	}
-	var b strings.Builder
-	b.WriteString("DATA_")
-	for _, r := range iv {
-		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
-			b.WriteRune(r)
-		}
-	}
-	tag := b.String()
-	if len(tag) <= len("DATA_") {
-		return "DATA"
-	}
-	return tag
-}
-
-func writeCSVDataBlock(b *strings.Builder, tag, csv string) {
-	tag = strings.TrimSpace(tag)
-	if tag == "" {
-		tag = "DATA"
-	}
-	tag = strings.ToUpper(tag)
-	b.WriteString("[" + tag + "_START]\n")
-	b.WriteString(csv)
-	if !strings.HasSuffix(csv, "\n") {
-		b.WriteByte('\n')
-	}
-	b.WriteString("[" + tag + "_END]\n\n")
 }

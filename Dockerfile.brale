@@ -34,9 +34,9 @@ RUN if [ -n "$DEBIAN_MIRROR" ]; then \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /usr/local/bin/brale /usr/local/bin/brale
-COPY configs/config.example.toml /app/config.toml
 COPY prompts /app/prompts
-ENV BRALE_CONFIG=/data/config.toml
+COPY configs /app/configs
+ENV BRALE_CONFIG=/app/configs/config.yaml
 VOLUME ["/data","/var/log/brale"]
 EXPOSE 9991
 ENTRYPOINT ["/usr/local/bin/brale"]

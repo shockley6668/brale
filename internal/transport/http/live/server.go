@@ -30,6 +30,7 @@ type ServerConfig struct {
 	Logs             *database.DecisionLogStore
 	FreqtradeHandler FreqtradeWebhookHandler
 	DefaultSymbols   []string
+	SymbolDetails    map[string]SymbolDetail
 	LogPaths         map[string]string
 }
 
@@ -49,7 +50,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	router.Use(gin.Recovery(), requestLogger())
 
 	// 先注册模板函数，再加载模板，否则自定义函数不可用
-	registerAdminRoutes(router, cfg.Logs, cfg.FreqtradeHandler, cfg.DefaultSymbols)
+	registerAdminRoutes(router, cfg.Logs, cfg.FreqtradeHandler, cfg.DefaultSymbols, cfg.SymbolDetails)
 
 	// 静态资源与模板
 	if err := loadTemplates(router); err != nil {

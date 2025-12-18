@@ -107,46 +107,20 @@ var adminTemplateFuncs = template.FuncMap{
 	"absPercent": func(val float64) float64 {
 		return math.Abs(val) * 100
 	},
-	"tierFieldLabel": func(f database.TierField) string {
-		switch f {
-		case database.TierFieldTakeProfit:
-			return "take_profit"
-		case database.TierFieldStopLoss:
-			return "stop_loss"
-		case database.TierFieldTier1:
-			return "tier1"
-		case database.TierFieldTier2:
-			return "tier2"
-		case database.TierFieldTier3:
-			return "tier3"
-		case database.TierFieldTier1Ratio:
-			return "tier1_ratio"
-		case database.TierFieldTier2Ratio:
-			return "tier2_ratio"
-		case database.TierFieldTier3Ratio:
-			return "tier3_ratio"
-		default:
-			return fmt.Sprintf("field-%d", f)
-		}
-	},
 	"operationLabel": func(op database.OperationType) string {
 		switch op {
 		case database.OperationOpen:
 			return "OPEN"
-		case database.OperationTier1:
-			return "TIER1"
-		case database.OperationTier2:
-			return "TIER2"
-		case database.OperationTier3:
-			return "TIER3"
 		case database.OperationTakeProfit:
 			return "TAKE_PROFIT"
 		case database.OperationStopLoss:
 			return "STOP_LOSS"
 		case database.OperationAdjust:
 			return "ADJUST"
-		case database.OperationUpdateTiers:
-			return "UPDATE_TIERS"
+		case database.OperationUpdatePlan:
+			return "UPDATE_PLAN"
+		case database.OperationFinalStop:
+			return "FINAL_STOP"
 		case database.OperationForceExit:
 			return "FORCE_EXIT"
 		case database.OperationFailed:
@@ -165,11 +139,12 @@ var adminTemplateFuncs = template.FuncMap{
 }
 
 // registerAdminRoutes 注册管理后台的 HTML 路由。
-func registerAdminRoutes(router *gin.Engine, logs *database.DecisionLogStore, freq FreqtradeWebhookHandler, defaultSymbols []string) {
+func registerAdminRoutes(router *gin.Engine, logs *database.DecisionLogStore, freq FreqtradeWebhookHandler, defaultSymbols []string, symbolDetails map[string]SymbolDetail) {
 	h := &adminHandler{
 		logs:           logs,
 		freq:           freq,
 		defaultSymbols: defaultSymbols,
+		symbolDetails:  symbolDetails,
 	}
 
 	// 添加模板辅助函数
@@ -199,6 +174,7 @@ type adminHandler struct {
 	logs           *database.DecisionLogStore
 	freq           FreqtradeWebhookHandler
 	defaultSymbols []string
+	symbolDetails  map[string]SymbolDetail
 }
 
 // renderApp 输出统一的 Vue 容器模板，前端自行通过 API 获取数据。
@@ -206,6 +182,7 @@ func (h *adminHandler) renderApp(c *gin.Context, view string, extras gin.H) {
 	payload := gin.H{
 		"InitialView":    view,
 		"DefaultSymbols": h.defaultSymbols,
+		"SymbolDetails":  h.symbolDetails,
 	}
 	for k, v := range extras {
 		payload[k] = v

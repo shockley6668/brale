@@ -158,24 +158,6 @@ function renderPositions() {
         `;
 }
 
-// 支持在 admin 侧 0-100% 输入分批比例，提交前自动转换为 0-1
-document.addEventListener('submit', (event) => {
-    const form = event.target;
-    if (!(form instanceof HTMLFormElement)) return;
-    if (form.dataset.tierForm !== 'true') return;
-    const ratioFields = ['tier1_ratio', 'tier2_ratio', 'tier3_ratio'];
-    ratioFields.forEach((name) => {
-        const input = form.querySelector(`input[name="${name}"]`);
-        if (!input || input.value === '') return;
-        const val = parseFloat(input.value);
-        if (Number.isNaN(val)) return;
-        if (val > 1) {
-            const pct = Math.min(val, 100);
-            input.value = (pct / 100).toFixed(4);
-        }
-    });
-});
-
 // 根据鼠标位置微调大书本的倾斜方向
 function applyBookTilt(maxTilt = 1.5) {
     const books = document.querySelectorAll('.big-open-book');

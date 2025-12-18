@@ -108,9 +108,11 @@ func (u *WSUpdater) Stats() SourceStats {
 	return u.Source.Stats()
 }
 
-// Close 释放底层资源。
+// Close releases underlying resources.
 func (u *WSUpdater) Close() {
 	if u.Source != nil {
-		_ = u.Source.Close()
+		if err := u.Source.Close(); err != nil {
+			logger.Warnf("[WS] source close error: %v", err)
+		}
 	}
 }

@@ -1,22 +1,26 @@
-# Local build artifacts
-bin/
-
-# IDE/editor
-.idea/
-
-# Local config (keep secrets out of VCS)
-configs/config.toml
-configs/user_data/freqtrade-config.json # Freqtrade specific user config
-
-# Tests (exclude from GitHub per request)
-*_test.go
-!internal/executor/freqtrade/manager_flow_test.go
-
-# Do not publish this helper file
-AGENTS.md
-
-data/
-.gocache/
+.cache/
 .gomodcache/
+.vscode/
 
-base.toml
+running_log/
+log.txt
+desc.org
+
+config.yaml
+configs/config.yaml
+
+*_test
+*_test.go
+
+# Binaries / build outputs
+/brale
+bin/
+dist/
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+*.o
+*.out
+*.test

@@ -14,7 +14,7 @@ help:
 	@echo "  make fmt      - gofmt 当前模块"
 	@echo "  make test     - 运行 ./internal/... 单测"
 	@echo "  make build    - 构建 ./cmd/brale 到 $(BIN)"
-	@echo "  make run      - 本地运行（配置 ./configs/config.toml）"
+	@echo "  make run      - 本地运行（配置 ./configs/config.yaml）"
 	@echo "  make prepare-dirs - 创建运行目录并复制 freqtrade 配置/策略"
 	@echo "  make up       - docker compose up -d（挂载 running_log 数据）"
 	@echo "  make down     - docker compose down"
@@ -34,7 +34,7 @@ build:
 	@echo "已生成：$(BIN)"
 
 run:
-	BRALE_CONFIG=./configs/config.toml go run ./cmd/brale
+	BRALE_CONFIG=./configs/config.yaml go run ./cmd/brale
 
 clean:
 	rm -rf $(BIN_DIR)
@@ -79,18 +79,18 @@ start:
 		status=$$(docker inspect -f '{{.State.Status}}' $$FT_CONTAINER 2>/dev/null); \
 		if [ "$$status" = "running" ]; then \
 			echo "freqtrade 已运行"; \
-			sleep 10 ;\
+			sleep 3 ;\
 			break; \
 		fi; \
 		if [ "$$status" = "exited" ] || [ -z "$$status" ]; then \
 			echo "freqtrade 状态异常: $$status"; \
 			$(DOCKER_COMPOSE) logs freqtrade; \
-			sleep 10 ;\
+			sleep 3 ;\
 			exit 1; \
 		fi; \
 		echo "当前状态：$$status，继续等待..."; \
 		sleep 5; \
 	done
-	sleep 10;
+	sleep 3;
 	@echo "启动 brale..."
 	$(DOCKER_COMPOSE) up -d brale

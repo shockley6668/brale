@@ -9,8 +9,10 @@ type CandleEvent struct {
 	Candle   Candle
 }
 
-// TradeEvent 表示实时成交价事件（例如 aggTrade）。
-type TradeEvent struct {
+// TickEvent represents a real-time trade/tick event (e.g., aggTrade).
+// Named TickEvent (not TradeEvent) to avoid confusion with adapter.TradeEvent
+// which represents trade operation events (open/close).
+type TickEvent struct {
 	Symbol    string
 	Price     float64
 	Quantity  float64
@@ -20,10 +22,10 @@ type TradeEvent struct {
 
 // OpenInterestPoint 对应交易所 API 返回的 OI 历史单条记录
 type OpenInterestPoint struct {
-	Symbol             string  `json:"symbol"`
-	SumOpenInterest    float64 `json:"sumOpenInterest"`
+	Symbol               string  `json:"symbol"`
+	SumOpenInterest      float64 `json:"sumOpenInterest"`
 	SumOpenInterestValue float64 `json:"sumOpenInterestValue"`
-	Timestamp          int64   `json:"timestamp"` // 毫秒级时间戳
+	Timestamp            int64   `json:"timestamp"` // 毫秒级时间戳
 }
 
 // SubscribeOptions 控制实时订阅行为。
@@ -48,7 +50,7 @@ type Source interface {
 	// Subscribe 订阅实时 K 线，返回只读事件通道；通道关闭意味着订阅已结束。
 	Subscribe(ctx context.Context, symbols, intervals []string, opts SubscribeOptions) (<-chan CandleEvent, error)
 	// SubscribeTrades 订阅实时成交价（如 aggTrade），供策略使用真实成交价触发。
-	SubscribeTrades(ctx context.Context, symbols []string, opts SubscribeOptions) (<-chan TradeEvent, error)
+	SubscribeTrades(ctx context.Context, symbols []string, opts SubscribeOptions) (<-chan TickEvent, error)
 	// GetFundingRate 获取最新资金费率。
 	GetFundingRate(ctx context.Context, symbol string) (float64, error)
 	// GetOpenInterestHistory 获取 OI 历史 (包含最新值)

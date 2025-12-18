@@ -3,21 +3,18 @@ package decision
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math"
 	"math/rand"
 	"sort"
 	"strings"
 	"time"
-
-	textutil "brale/internal/pkg/text"
 )
 
 // MetaAggregator：逐币种多数决（留权重，默认相等）。
 // 规则：
 // - 每个模型可以返回多个动作，针对同一 symbol+action 仅记一票
 // - 对 symbol+action 进行加权投票，权重达到 2/3（默认）阈值才执行；不足则忽略
-// - 若 "hold" 票数达到阈值，则整轮观望
+// - hold 默认按 symbol 计票；若模型返回不带 symbol 的 hold，视为“整轮观望”
 // - MetaSummary 会列出各 symbol 各动作的票数，方便查看分歧
 type MetaAggregator struct {
 	Weights    map[string]float64
@@ -61,7 +58,12 @@ func (a MetaAggregator) Aggregate(ctx context.Context, outputs []ModelOutput) (M
 			}
 			sym := strings.ToUpper(strings.TrimSpace(d.Symbol))
 			if act == "hold" {
-				sym = holdSymbolKey
+				// 兼容两种 hold：
+				// 1) 带 symbol：仅表示该 symbol 观望（不应跨币种累加）
+				// 2) 不带 symbol：表示整轮观望（全局 hold）
+				if sym == "" {
+					sym = holdSymbolKey
+				}
 			} else if sym == "" {
 				continue
 			}
@@ -88,15 +90,18 @@ func (a MetaAggregator) Aggregate(ctx context.Context, outputs []ModelOutput) (M
 		return ModelOutput{}, errors.New("无可用的模型输出")
 	}
 	threshold := computeThreshold(totalWeight)
+	breakdown := buildMetaVoteBreakdown(votes, details, threshold, totalWeight)
 
 	// 若 hold 票达到阈值，则整轮观望
 	if hv, ok := votes[holdSymbolKey]; ok {
 		if hv["hold"] >= threshold {
+			holdDecision, winners := buildHoldDecision(outputs, votes, details, threshold, totalWeight, prefIndex)
 			res := DecisionResult{
-				Decisions:   []Decision{{Action: "hold"}},
-				MetaSummary: buildHoldSummary(votes, details, threshold),
+				Decisions:     []Decision{holdDecision},
+				MetaSummary:   "", // Removed unused summary
+				MetaBreakdown: breakdown,
 			}
-			return buildMetaOutput(outputs, res, map[string]float64{}, prefIndex), nil
+			return buildMetaOutput(outputs, res, winners, prefIndex), nil
 		}
 	}
 
@@ -132,15 +137,192 @@ func (a MetaAggregator) Aggregate(ctx context.Context, outputs []ModelOutput) (M
 	}
 	if len(decisions) == 0 {
 		// 没有任何动作满足阈值，退回 hold
+		holdDecision, winners := buildHoldDecision(outputs, votes, details, threshold, totalWeight, prefIndex)
 		res := DecisionResult{
-			Decisions:   []Decision{{Action: "hold"}},
-			MetaSummary: buildHoldSummary(votes, details, threshold),
+			Decisions:     []Decision{holdDecision},
+			MetaSummary:   "", // Removed unused summary
+			MetaBreakdown: breakdown,
 		}
-		return buildMetaOutput(outputs, res, map[string]float64{}, prefIndex), nil
+		return buildMetaOutput(outputs, res, winners, prefIndex), nil
 	}
-	summary := buildActionSummary(votes, details, threshold)
-	res := DecisionResult{Decisions: decisions, MetaSummary: summary}
+	res := DecisionResult{Decisions: decisions, MetaSummary: "", MetaBreakdown: breakdown}
 	return buildMetaOutput(outputs, res, winners, prefIndex), nil
+}
+
+func buildHoldDecision(outputs []ModelOutput, votes map[string]map[string]float64, details map[string]map[string][]metaChoice, threshold, totalWeight float64, pref map[string]int) (Decision, map[string]float64) {
+	hold := Decision{Action: "hold"}
+
+	sym, act, providerID, choice, ok := pickMajorityChoice(votes, details, pref)
+	if !ok {
+		hold.Reasoning = "未达执行阈值，保持观望。"
+		return hold, map[string]float64{}
+	}
+
+	reasoning := strings.TrimSpace(choice.Reasoning)
+	if reasoning == "" && providerID != "" {
+		if out := findProviderOutput(outputs, providerID); out != nil {
+			reasoning = summarizeRawOutput(out.Raw)
+		}
+	}
+	if reasoning == "" {
+		reasoning = "未达执行阈值，保持观望。"
+	}
+
+	// 当最终为 HOLD 时，为避免误解，明确说明“多数倾向”来自哪个动作。
+	// 对于多 symbol 的情况，追加 symbol 仅用于日志展示；实际执行仍为 HOLD。
+	if act != "" && act != "hold" {
+		prefix := "未达执行阈值，保持观望。多数倾向: " + strings.ToUpper(act)
+		if sym != "" && sym != holdSymbolKey {
+			prefix += " (" + sym + ")"
+		}
+		reasoning = prefix + "\n" + reasoning
+	}
+	hold.Reasoning = reasoning
+
+	if providerID == "" {
+		return hold, map[string]float64{}
+	}
+	return hold, map[string]float64{providerID: 1}
+}
+
+func pickMajorityChoice(votes map[string]map[string]float64, details map[string]map[string][]metaChoice, pref map[string]int) (string, string, string, Decision, bool) {
+	if len(votes) == 0 || len(details) == 0 {
+		return "", "", "", Decision{}, false
+	}
+
+	syms := make([]string, 0, len(votes))
+	for sym := range votes {
+		if sym == holdSymbolKey {
+			continue
+		}
+		syms = append(syms, sym)
+	}
+	sort.Strings(syms)
+
+	targetSym := ""
+	switch {
+	case len(syms) == 1:
+		targetSym = syms[0]
+	case votes[holdSymbolKey] != nil:
+		targetSym = holdSymbolKey
+	default:
+		bestTotal := -1.0
+		for sym, actions := range votes {
+			if sym == holdSymbolKey {
+				continue
+			}
+			sum := 0.0
+			for _, w := range actions {
+				sum += w
+			}
+			if targetSym == "" || sum > bestTotal || (sum == bestTotal && sym < targetSym) {
+				targetSym = sym
+				bestTotal = sum
+			}
+		}
+	}
+	if targetSym == "" {
+		return "", "", "", Decision{}, false
+	}
+
+	actions := votes[targetSym]
+	if len(actions) == 0 {
+		return "", "", "", Decision{}, false
+	}
+	majorAct := ""
+	majorWeight := -1.0
+	for act, w := range actions {
+		if majorAct == "" || w > majorWeight || (w == majorWeight && act < majorAct) {
+			majorAct = act
+			majorWeight = w
+		}
+	}
+	if majorAct == "" {
+		return "", "", "", Decision{}, false
+	}
+
+	choices := details[targetSym][majorAct]
+	if len(choices) == 0 {
+		return targetSym, majorAct, "", Decision{}, false
+	}
+	providerID, bestDecision := pickPreferredDecision(choices, pref)
+	if providerID == "" {
+		return targetSym, majorAct, "", Decision{}, false
+	}
+	return targetSym, majorAct, providerID, bestDecision, true
+}
+
+func pickPreferredDecision(choices []metaChoice, pref map[string]int) (string, Decision) {
+	type agg struct {
+		weight   float64
+		decision Decision
+		hasDec   bool
+	}
+	byProvider := make(map[string]*agg)
+	for _, c := range choices {
+		id := strings.TrimSpace(c.ID)
+		if id == "" {
+			continue
+		}
+		item := byProvider[id]
+		if item == nil {
+			item = &agg{}
+			byProvider[id] = item
+		}
+		item.weight += c.Weight
+		if !item.hasDec || (strings.TrimSpace(item.decision.Reasoning) == "" && strings.TrimSpace(c.Decision.Reasoning) != "") {
+			item.decision = c.Decision
+			item.hasDec = true
+		}
+	}
+	if len(byProvider) == 0 {
+		return "", Decision{}
+	}
+	bestID := ""
+	bestRank := len(pref) + 1
+	bestWeight := -1.0
+	for id, item := range byProvider {
+		rank := len(pref) + 1
+		if r, ok := pref[id]; ok {
+			rank = r
+		}
+		if bestID == "" || rank < bestRank || (rank == bestRank && (item.weight > bestWeight || (item.weight == bestWeight && id < bestID))) {
+			bestID = id
+			bestRank = rank
+			bestWeight = item.weight
+		}
+	}
+	if bestID == "" {
+		return "", Decision{}
+	}
+	return bestID, byProvider[bestID].decision
+}
+
+func summarizeRawOutput(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	raw = strings.ReplaceAll(raw, "\r", "\n")
+	lines := strings.Split(raw, "\n")
+	best := ""
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		best = line
+		break
+	}
+	if best == "" {
+		best = raw
+	}
+	const maxRunes = 240
+	runes := []rune(best)
+	if len(runes) > maxRunes {
+		best = string(runes[:maxRunes]) + "…"
+	}
+	return best
 }
 
 func pickDecision(choices []metaChoice, action, symbol string, pref map[string]int) Decision {
@@ -244,50 +426,6 @@ func computeThreshold(total float64) float64 {
 	}
 	val := total * 2.0 / 3.0
 	return math.Max(val, total*0.5)
-}
-
-func buildHoldSummary(votes map[string]map[string]float64, details map[string]map[string][]metaChoice, threshold float64) string {
-	holdWeight := 0.0
-	if hv, ok := votes[holdSymbolKey]; ok {
-		holdWeight = hv["hold"]
-	}
-	return fmt.Sprintf("Meta聚合：多数模型选择 HOLD（阈值 %.2f，hold 票 %.2f），本轮不执行任何动作。", threshold, holdWeight)
-}
-
-func buildActionSummary(votes map[string]map[string]float64, details map[string]map[string][]metaChoice, threshold float64) string {
-	var b strings.Builder
-	b.WriteString(fmt.Sprintf("Meta聚合：动作按阈值 %.2f 加权多数决。\n", threshold))
-	syms := make([]string, 0, len(votes))
-	for sym := range votes {
-		if sym == holdSymbolKey {
-			continue
-		}
-		syms = append(syms, sym)
-	}
-	sort.Strings(syms)
-	for _, sym := range syms {
-		actNames := make([]string, 0, len(votes[sym]))
-		for act := range votes[sym] {
-			actNames = append(actNames, act)
-		}
-		sort.Strings(actNames)
-		for _, act := range actNames {
-			weight := votes[sym][act]
-			b.WriteString(fmt.Sprintf("%s · %s => %.2f\n", sym, act, weight))
-			for _, c := range details[sym][act] {
-				reason := strings.TrimSpace(c.Decision.Reasoning)
-				if reason != "" {
-					reason = strings.ReplaceAll(reason, "\r\n", " ")
-					reason = strings.ReplaceAll(reason, "\n", " ")
-				}
-				if reason == "" {
-					reason = "-"
-				}
-				b.WriteString(fmt.Sprintf("  - %s[%.2f]: %s\n", c.ID, c.Weight, textutil.Truncate(reason, 480)))
-			}
-		}
-	}
-	return b.String()
 }
 
 func buildMetaOutput(outputs []ModelOutput, res DecisionResult, winners map[string]float64, pref map[string]int) ModelOutput {

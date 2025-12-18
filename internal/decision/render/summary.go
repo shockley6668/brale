@@ -12,20 +12,17 @@ type TemplateLoader interface {
 }
 
 type Sections struct {
-	LastDecisions string
-	Positions     string
-	Derivatives   string
-	Klines        string
-	Insights      string
-	Guidelines    string
+	Account     string
+	Previous    string
+	Derivatives string
+	Positions   string
+	Klines      string
+	Agents      string
+	Guidelines  string
 }
 
 const defaultTemplate = `# 决策输入（Multi-Agent 汇总）
-{{if .LastDecisions}}{{.LastDecisions}}{{end}}
-{{if .Positions}}{{.Positions}}{{end}}
-{{if .Derivatives}}{{.Derivatives}}{{end}}
-{{if .Klines}}{{.Klines}}{{end}}
-{{if .Insights}}{{.Insights}}{{end}}
+{{if .Account}}{{.Account}}{{end}}{{if .Previous}}{{.Previous}}{{end}}{{if .Derivatives}}{{.Derivatives}}{{end}}{{if .Klines}}{{.Klines}}{{end}}{{if .Positions}}{{.Positions}}{{end}}{{if .Agents}}{{.Agents}}{{end}}
 {{.Guidelines}}`
 
 var defaultSummaryTemplate = template.Must(template.New("user_summary_default").Parse(defaultTemplate))
@@ -53,10 +50,10 @@ func RenderSummary(loader TemplateLoader, sections Sections) string {
 func fallbackSummary(sections Sections) string {
 	var b strings.Builder
 	b.WriteString("# 决策输入（Multi-Agent 汇总）\n")
-	if s := strings.TrimSpace(sections.LastDecisions); s != "" {
+	if s := strings.TrimSpace(sections.Account); s != "" {
 		b.WriteString(s)
 	}
-	if s := strings.TrimSpace(sections.Positions); s != "" {
+	if s := strings.TrimSpace(sections.Previous); s != "" {
 		b.WriteString(s)
 	}
 	if s := strings.TrimSpace(sections.Derivatives); s != "" {
@@ -65,7 +62,10 @@ func fallbackSummary(sections Sections) string {
 	if s := strings.TrimSpace(sections.Klines); s != "" {
 		b.WriteString(s)
 	}
-	if s := strings.TrimSpace(sections.Insights); s != "" {
+	if s := strings.TrimSpace(sections.Positions); s != "" {
+		b.WriteString(s)
+	}
+	if s := strings.TrimSpace(sections.Agents); s != "" {
 		b.WriteString(s)
 	}
 	b.WriteString(sections.Guidelines)

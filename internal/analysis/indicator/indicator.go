@@ -6,7 +6,6 @@ import (
 
 	"github.com/markcheno/go-talib"
 
-	"brale/internal/config"
 	"brale/internal/market"
 )
 
@@ -14,8 +13,22 @@ import (
 type Settings struct {
 	Symbol   string
 	Interval string
-	EMA      config.EMAConfig
-	RSI      config.RSIConfig
+	EMA      EMASettings
+	RSI      RSISettings
+}
+
+// EMASettings 描述 EMA 指标参数。
+type EMASettings struct {
+	Fast int `json:"fast,omitempty"`
+	Mid  int `json:"mid,omitempty"`
+	Slow int `json:"slow,omitempty"`
+}
+
+// RSISettings 描述 RSI 指标参数。
+type RSISettings struct {
+	Period     int     `json:"period,omitempty"`
+	Oversold   float64 `json:"oversold,omitempty"`
+	Overbought float64 `json:"overbought,omitempty"`
 }
 
 // IndicatorValue 保存单个指标的最新值、序列与状态。
@@ -185,6 +198,29 @@ func ComputeAll(candles []market.Candle, cfg Settings) (Report, error) {
 	}
 
 	return rep, nil
+}
+
+// ComputeATRSeries 单独计算 ATR 序列，便于在禁用其它指标时仍可获取波动率数据。
+func ComputeATRSeries(candles []market.Candle, period int) ([]float64, error) {
+	if len(candles) == 0 {
+		return nil, fmt.Errorf("no candles")
+	}
+	if period <= 0 {
+		period = 14
+	}
+	highs := make([]float64, len(candles))
+	lows := make([]float64, len(candles))
+	closes := make([]float64, len(candles))
+	for i, c := range candles {
+		highs[i] = c.High
+		lows[i] = c.Low
+		closes[i] = c.Close
+	}
+	series := sanitizeSeries(talib.Atr(highs, lows, closes, period))
+	if len(series) == 0 {
+		return nil, fmt.Errorf("atr series empty")
+	}
+	return series, nil
 }
 
 func sanitizeSeries(src []float64) []float64 {

@@ -37,3 +37,15 @@ func RSI(prices []float64, period int) float64 {
 	}
 	return out[len(out)-1]
 }
+
+// ClassifyTrend 根据 EMA 的排列判断趋势。
+func ClassifyTrend(fast, mid, slow float64) string {
+	switch {
+	case fast >= mid && mid >= slow:
+		return "UP"
+	case fast <= mid && mid <= slow:
+		return "DOWN"
+	default:
+		return "MIXED"
+	}
+}

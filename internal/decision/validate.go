@@ -1,6 +1,9 @@
 package decision
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // 中文说明：
 // 基础决策校验：
@@ -9,17 +12,7 @@ import "fmt"
 
 var validActions = map[string]bool{
 	"open_long": true, "open_short": true, "close_long": true, "close_short": true,
-	"hold": true, "wait": true, "adjust_stop_loss": true, "adjust_take_profit": true,
-	"update_tiers": true,
-}
-
-func ValidateAll(ds []Decision) error {
-	for i := range ds {
-		if err := Validate(&ds[i]); err != nil {
-			return fmt.Errorf("决策#%d 无效: %w", i+1, err)
-		}
-	}
-	return nil
+	"hold": true, "wait": true, "update_exit_plan": true,
 }
 
 func Validate(d *Decision) error {
@@ -34,53 +27,22 @@ func Validate(d *Decision) error {
 		if d.PositionSizeUSD <= 0 {
 			return fmt.Errorf("开仓需提供 position_size_usd>0")
 		}
-		if d.StopLoss <= 0 || d.TakeProfit <= 0 {
-			return fmt.Errorf("开仓需提供有效止损/止盈")
+		if d.ExitPlan == nil || strings.TrimSpace(d.ExitPlan.ID) == "" {
+			return fmt.Errorf("开仓需提供 exit_plan")
 		}
 		if d.Confidence < 0 || d.Confidence > 100 {
 			return fmt.Errorf("confidence 范围0-100")
 		}
-		if err := validateTiers(d.Tiers, true); err != nil {
-			return err
-		}
-	case "adjust_stop_loss":
-		if d.StopLoss <= 0 {
-			return fmt.Errorf("调整止损需提供 stop_loss>0")
-		}
-	case "adjust_take_profit":
-		if d.TakeProfit <= 0 {
-			return fmt.Errorf("调整止盈需提供 take_profit>0")
-		}
-	case "update_tiers":
-		if err := validateTiers(d.Tiers, false); err != nil {
-			return err
+		// Tiers validation removed
+	case "update_exit_plan":
+		if d.ExitPlan == nil || strings.TrimSpace(d.ExitPlan.ID) == "" {
+			return fmt.Errorf("update_exit_plan 需提供 exit_plan")
 		}
 	}
 	return nil
 }
 
-func validateTiers(t *DecisionTiers, requireAll bool) error {
-	if t == nil {
-		return fmt.Errorf("需提供 tiers 配置")
-	}
-	if requireAll {
-		if t.Tier1Target <= 0 || t.Tier2Target <= 0 || t.Tier3Target <= 0 {
-			return fmt.Errorf("tiers 目标价需 >0")
-		}
-	} else {
-		if t.Tier1Target <= 0 && t.Tier2Target <= 0 && t.Tier3Target <= 0 {
-			return fmt.Errorf("需提供至少一个 tier 目标价>0")
-		}
-		if t.Tier1Target < 0 || t.Tier2Target < 0 || t.Tier3Target < 0 {
-			return fmt.Errorf("tier 目标价不能为负")
-		}
-	}
-	// 允许 ratio 缺省，程序会默认填入
-	if t.Tier1Ratio < 0 || t.Tier2Ratio < 0 || t.Tier3Ratio < 0 {
-		return fmt.Errorf("tiers 比例需 >=0")
-	}
-	return nil
-}
+// validateTiers removed
 
 // ValidateWithPrice 带当前价格的校验，增加：
 // - 多空止损/止盈相对关系
@@ -90,6 +52,10 @@ func ValidateWithPrice(d *Decision, price float64, minRR float64) error {
 		return err
 	}
 	if d.Action != "open_long" && d.Action != "open_short" {
+		return nil
+	}
+	if d.StopLoss <= 0 || d.TakeProfit <= 0 {
+		// 当仅提供 exit_plan（百分比）时无法做绝对价校验，直接跳过。
 		return nil
 	}
 	if price <= 0 {

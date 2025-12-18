@@ -27,7 +27,6 @@ func RenderThoughtsTable(rows []ThoughtRow, _ int) string {
 		return ""
 	}
 	var sb strings.Builder
-	sb.WriteString("=== AI 思维链 ===\n")
 	for _, row := range rows {
 		provider := fallback(row.Provider, "-")
 		status := ""
@@ -101,10 +100,7 @@ func RenderFinalDecisionsTable(ds []Decision, _ int) string {
 			tp = fmt.Sprintf("%.4f", d.TakeProfit)
 		}
 		sb.WriteString(fmt.Sprintf("- action=%s symbol=%s sl=%s tp=%s\n", strings.TrimSpace(d.Action), strings.TrimSpace(d.Symbol), sl, tp))
-		if tiers := formatTiers(d.Tiers); tiers != "" {
-			sb.WriteString(indentLines(tiers, "    "))
-			sb.WriteRune('\n')
-		}
+		// Tiers display removed
 		reason := strings.TrimSpace(d.Reasoning)
 		if reason != "" {
 			sb.WriteString(indentLines(reason, "    "))
@@ -112,23 +108,6 @@ func RenderFinalDecisionsTable(ds []Decision, _ int) string {
 		}
 	}
 	return strings.TrimRight(sb.String(), "\n")
-}
-
-func formatTiers(t *DecisionTiers) string {
-	if t == nil {
-		return ""
-	}
-	var parts []string
-	if t.Tier1Target > 0 {
-		parts = append(parts, fmt.Sprintf("tier1=%.4f (%.2f%%)", t.Tier1Target, t.Tier1Ratio*100))
-	}
-	if t.Tier2Target > 0 {
-		parts = append(parts, fmt.Sprintf("tier2=%.4f (%.2f%%)", t.Tier2Target, t.Tier2Ratio*100))
-	}
-	if t.Tier3Target > 0 {
-		parts = append(parts, fmt.Sprintf("tier3=%.4f (%.2f%%)", t.Tier3Target, t.Tier3Ratio*100))
-	}
-	return strings.Join(parts, "; ")
 }
 
 func indentLines(text, prefix string) string {

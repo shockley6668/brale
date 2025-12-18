@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	brcfg "brale/internal/config"
 	"brale/internal/logger"
 )
 
@@ -29,11 +28,10 @@ type MetricsService struct {
 	mu      sync.RWMutex               // 保护 cache
 	symbols []string                   // 需要监控的币种列表
 
-	decisionInterval       time.Duration        // 用于计算后台更新频率，以平摊 API 请求
-	horizonProfile         brcfg.HorizonProfile // 持仓周期配置，用于动态计算 OI 历史周期
-	baseOIHistoryPeriod    string               // OI 历史拉取的基准周期 (例如 "15m", "1h")
-	oiHistoryLimit         int                  // OI 历史拉取的数量 (例如 100, 30)
-	targetOIHistTimeframes []string             // 需要在 Prompt 中展示的 OI 历史周期 (例如 "1h", "4h", "1d")
+	pollInterval           time.Duration // 后台轮询周期（仅用于 Start；按需刷新可不启动）
+	baseOIHistoryPeriod    string        // OI 历史拉取的基准周期 (例如 "15m", "1h")
+	oiHistoryLimit         int           // OI 历史拉取的数量 (例如 100, 30)
+	targetOIHistTimeframes []string      // 需要在 Prompt 中展示的 OI 历史周期 (例如 "1h", "4h", "1d")
 }
 
 // GetTargetTimeframes 返回 MetricsService 关注的 OI 历史时间周期列表
@@ -41,14 +39,23 @@ func (s *MetricsService) GetTargetTimeframes() []string {
 	return s.targetOIHistTimeframes
 }
 
-// NewMetricsService 创建 MetricsService 实例
+// BaseOIHistoryPeriod 返回 OI 历史拉取的基准周期
+func (s *MetricsService) BaseOIHistoryPeriod() string {
+	return s.baseOIHistoryPeriod
+}
+
+// OIHistoryLimit 返回 OI 历史拉取的数量
+func (s *MetricsService) OIHistoryLimit() int {
+	return s.oiHistoryLimit
+}
+
+// NewMetricsService Create MetricsService instance
 func NewMetricsService(
 	source Source,
 	symbols []string,
-	decisionIntervalSeconds int,
-	horizon brcfg.HorizonProfile, // 新增参数
-) *MetricsService {
-	// 过滤空 symbol
+	timeframes []string,
+) (*MetricsService, error) {
+	// Filter empty symbol
 	validSymbols := make([]string, 0, len(symbols))
 	for _, s := range symbols {
 		s = strings.ToUpper(strings.TrimSpace(s))
@@ -57,36 +64,34 @@ func NewMetricsService(
 		}
 	}
 	if len(validSymbols) == 0 {
-		return nil
+		return nil, nil // No symbols requested, validly disabled
 	}
 
-	// 合并所有 Timeframes 并去重，用于确定 OI 历史拉取范围
-	allTimeframes := horizon.AllTimeframes()
+	// Merge all Timeframes and delete duplicates, used to determine the OI historical pull range
+	allTimeframes := normalizeTimeframes(timeframes)
 	if len(allTimeframes) == 0 {
-		logger.Warnf("MetricsService: Horizon Profile 未配置任何 K 线周期，无法计算 OI 历史拉取范围。")
-		// Fallback to a default if no timeframes are configured
-		allTimeframes = []string{"1h", "4h", "1d"}
+		return nil, fmt.Errorf("metrics configuration missing timeframes")
 	}
 
 	basePeriod, historyLimit, targetTimeframes := calculateOIHistoryParams(allTimeframes)
 	if basePeriod == "" {
-		// 再次fallback
-		basePeriod = "1h"
-		historyLimit = 30
-		targetTimeframes = []string{"1h", "4h", "1d"}
-		logger.Warnf("MetricsService: 无法从 Horizon Profile 计算 OI 历史参数，将使用默认值: period=%s, limit=%d", basePeriod, historyLimit)
+		return nil, fmt.Errorf("failed to calculate valid OI history params from timeframes: %v", allTimeframes)
+	}
+
+	pollInterval := 5 * time.Minute
+	if dur, err := parseTimeframe(basePeriod); err == nil && dur > 0 {
+		pollInterval = dur
 	}
 
 	return &MetricsService{
 		source:                 source,
 		cache:                  make(map[string]DerivativesData),
 		symbols:                validSymbols,
-		decisionInterval:       time.Duration(decisionIntervalSeconds) * time.Second,
-		horizonProfile:         horizon,
+		pollInterval:           pollInterval,
 		baseOIHistoryPeriod:    basePeriod,
 		oiHistoryLimit:         historyLimit,
 		targetOIHistTimeframes: targetTimeframes,
-	}
+	}, nil
 }
 
 // Get 从缓存中获取指定交易对的衍生品数据
@@ -121,6 +126,19 @@ func (s *MetricsService) Funding(ctx context.Context, symbol string) (float64, e
 	return data.FundingRate, nil
 }
 
+// RefreshSymbol 立即刷新指定币种的衍生品数据（OI/Funding），并写入内存缓存。
+// 该方法用于“按 LLM 执行时间/按币种”更新衍生品数据，避免后台步进与决策调度耦合。
+func (s *MetricsService) RefreshSymbol(ctx context.Context, symbol string) {
+	if s == nil {
+		return
+	}
+	symbol = strings.ToUpper(strings.TrimSpace(symbol))
+	if symbol == "" || s.source == nil {
+		return
+	}
+	s.updateSymbol(ctx, symbol)
+}
+
 // Start 启动后台轮询，周期性更新缓存
 func (s *MetricsService) Start(ctx context.Context) {
 	count := len(s.symbols)
@@ -131,13 +149,13 @@ func (s *MetricsService) Start(ctx context.Context) {
 
 	// 计算请求步进：在决策周期的前 90% 时间内完成所有币种的更新
 	// 避免在决策前最后一刻还在请求，留出缓存更新的缓冲
-	effectiveInterval := s.decisionInterval
-	if s.decisionInterval > 10*time.Second { // 至少保留 10s 缓冲，或者 10%
-		effectiveInterval = s.decisionInterval - (s.decisionInterval / 10)
+	effectiveInterval := s.pollInterval
+	if s.pollInterval > 10*time.Second { // 至少保留 10s 缓冲，或者 10%
+		effectiveInterval = s.pollInterval - (s.pollInterval / 10)
 		if effectiveInterval < 10*time.Second { // 最少有效周期不能太短
 			effectiveInterval = 10 * time.Second
 		}
-	} else if s.decisionInterval == 0 { // 避免除零
+	} else if s.pollInterval == 0 { // 避免除零
 		effectiveInterval = 60 * time.Second // 默认 1分钟
 	}
 
@@ -153,7 +171,7 @@ func (s *MetricsService) Start(ctx context.Context) {
 	}
 
 	logger.Infof("MetricsService 启动: 监控 %d 个币种, 决策周期 %v, 有效轮询周期 %v, 每个币种步进 %v",
-		count, s.decisionInterval, effectiveInterval, step)
+		count, s.pollInterval, effectiveInterval, step)
 
 	ticker := time.NewTicker(step)
 	defer ticker.Stop()
@@ -298,6 +316,28 @@ func (s *MetricsService) updateSymbol(ctx context.Context, symbol string) {
 	} else {
 		logger.Warnf("MetricsService: 更新 %s 部分或全部失败: %s", symbol, newData.Error)
 	}
+}
+
+func normalizeTimeframes(items []string) []string {
+	if len(items) == 0 {
+		return nil
+	}
+	set := make(map[string]struct{}, len(items))
+	for _, iv := range items {
+		norm := strings.ToLower(strings.TrimSpace(iv))
+		if norm == "" {
+			continue
+		}
+		set[norm] = struct{}{}
+	}
+	if len(set) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(set))
+	for tf := range set {
+		out = append(out, tf)
+	}
+	return out
 }
 
 // calculateOIHistoryParams 根据 horizonTimeframes 计算最佳的 OI 历史拉取周期和数量

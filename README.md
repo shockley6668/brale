@@ -40,20 +40,20 @@
 
 ```bash
 # Copy configuration templates
-cp configs/config.example.toml configs/config.toml
+cp configs/config.example.yaml configs/config.yaml
 cp configs/user_data/freqtrade-config.example.json configs/user_data/freqtrade-config.json
 
 # Notes:
-# 1. Fill in your LLM API Key in configs/config.toml
+# 1. Fill in your LLM API Key in configs/config.yaml
 # 2. Configure Exchange API in configs/user_data/freqtrade-config.json (or use dry-run mode)
-# 3. Update [ai.multi_agent], [ai.provider_preference], and K-line horizons in config.toml as needed, or use defaults.
-# 4. Ensure [freqtrade.username] and [freqtrade.password] in config.toml match [api_server.username] and [api_server.password] in freqtrade-config.json.
-# 5. To enable Telegram notifications: Set [telegram.enabled] in freqtrade-config.json AND [notify.telegram.enabled] in config.toml to true, then fill in the token and chat_id.
+# 3. Update [ai.multi_agent], [ai.provider_preference], and profile parameters in config.yaml/profiles.yaml as needed.
+# 4. Ensure [freqtrade.username] and [freqtrade.password] in config.yaml match [api_server.username] and [api_server.password] in freqtrade-config.json.
+# 5. To enable Telegram notifications: Set [telegram.enabled] in freqtrade-config.json AND [notify.telegram.enabled] in config.yaml to true, then fill in the token and chat_id.
 ```
 
 #### 1.1 Proxy Access
 ```bash
-# 1. If using a proxy, enable [market.sources.proxy.enabled] in config.toml and fill in your HTTP/SOCKS5 links.
+# 1. If using a proxy, enable [market.sources.proxy.enabled] in config.yaml and fill in your HTTP/SOCKS5 links.
 # 2. Uncomment the proxy environment variables in docker-compose.yml (for both freqtrade and brale services) and set HTTP_PROXY / HTTPS_PROXY to your local port.
 # 3. Update [exchange.ccxt_config.proxies] and [exchange.ccxt_async_config.aiohttp_proxy] in freqtrade-config.json with your local port (copy these fields to your active config if needed).
 ```
@@ -88,6 +88,15 @@ make logs
 # Health check
 curl http://localhost:9991/healthz
 ```
+
+## 🔌 Execution Layer (Pluggable)
+
+Brale executes trades through a pluggable executor abstraction. The default implementation uses [Freqtrade](https://github.com/freqtrade/freqtrade), but nothing in the core logic is tied to it:
+
+- Set `freqtrade.enabled` to `false` in `configs/config.yaml` if you only want signal generation or plan to supply your own executor.
+- The executor interface lives in `internal/gateway/freqtrade/executor.go` and defines the full contract (position sync, plan events, manual tier updates, etc.). Any implementation that satisfies this interface can be injected.
+- Plug in a custom executor by implementing that interface (e.g., for a different trading engine or proprietary broker), then provide it via `app.WithFreqManager(...)` or your own `buildFreqManager` replacement.
+- Because the agent/plan scheduler components communicate only through the interface, you can reuse exit-plan logic, plan scheduler, Telegram notifications, and monitoring with a new executor without changing the AI or pipeline layers.
 
 ## 🧩 Indicator System
 

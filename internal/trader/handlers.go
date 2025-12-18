@@ -1,0 +1,318 @@
+package trader
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strconv"
+	"strings"
+	"time"
+
+	"brale/internal/gateway/database"
+	"brale/internal/gateway/exchange"
+	"brale/internal/logger"
+)
+
+// handleSignalEntry processes an entry signal asynchronously.
+// It validation logic runs in actor loop, but execution runs in background.
+func (t *Trader) handleSignalEntry(payload json.RawMessage, traceID string) error {
+	var sp SignalEntryPayload
+	var input exchange.OpenRequest
+
+	// Parsing logic
+	if err := json.Unmarshal(payload, &sp); err == nil && sp.Order.Symbol != "" {
+		input = sp.Order
+	} else {
+		if err := json.Unmarshal(payload, &input); err != nil {
+			return fmt.Errorf("invalid payload for signal_entry: %w", err)
+		}
+	}
+
+	logger.Infof("Trader handling signal entry for %s %s (async)", input.Symbol, input.Side)
+
+	// Idempotency check (simple version)
+	if _, exists := t.state.Positions[input.Symbol]; exists {
+		logger.Warnf("Position already exists for %s, ignoring entry signal", input.Symbol)
+		return nil
+	}
+
+	// Async Execution
+	go func() {
+		// Context with timeout for execution
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		result, err := t.executor.OpenPosition(ctx, input)
+		reqID := traceID
+		if reqID == "" {
+			reqID = newEventID("open")
+		}
+
+		res := OrderResultPayload{
+			RequestID: reqID,
+			Action:    OrderActionOpen,
+			Reason:    "signal_entry",
+			Symbol:    input.Symbol,
+			Side:      input.Side,
+			Original:  input,
+			Timestamp: time.Now(),
+		}
+		if result != nil {
+			res.TradeID = result.PositionID
+			res.OrderID = result.OrderID
+		}
+		if err != nil {
+			res.Error = err.Error()
+		}
+
+		// Send result back to Actor
+		payloadBytes, _ := json.Marshal(res)
+		t.Send(EventEnvelope{
+			ID:        newEventID("order-result"),
+			Type:      EvtOrderResult,
+			Payload:   payloadBytes,
+			CreatedAt: time.Now(),
+			Symbol:    normalizeSymbol(input.Symbol),
+		})
+	}()
+
+	return nil
+}
+
+// applyPositionOpening persists an entry order that is not fully filled yet.
+func (t *Trader) applyPositionOpening(payload json.RawMessage) error {
+	var p PositionOpeningPayload
+	if err := json.Unmarshal(payload, &p); err != nil {
+		return fmt.Errorf("invalid payload for position_opening: %w", err)
+	}
+	symbol := normalizeSymbol(p.Symbol)
+	if symbol == "" {
+		return fmt.Errorf("position_opening missing symbol")
+	}
+	createdAt := p.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = time.Now()
+	}
+	if t.posStore != nil {
+		rec := database.LiveOrderRecord{
+			Symbol:    symbol,
+			Side:      strings.ToLower(strings.TrimSpace(p.Side)),
+			Status:    database.LiveOrderStatusOpening,
+			StartTime: &createdAt,
+			CreatedAt: createdAt,
+			UpdatedAt: createdAt,
+		}
+		if p.TradeID != "" {
+			if id, err := strconv.Atoi(strings.TrimSpace(p.TradeID)); err == nil {
+				rec.FreqtradeID = id
+			}
+		}
+		if p.Stake > 0 {
+			stake := p.Stake
+			rec.StakeAmount = &stake
+			rec.PositionValue = &stake
+		}
+		if p.Leverage > 0 {
+			lev := p.Leverage
+			rec.Leverage = &lev
+		}
+		if p.Amount > 0 {
+			amt := p.Amount
+			rec.InitialAmount = &amt
+			rec.Amount = &amt
+		}
+		if p.Price > 0 {
+			price := p.Price
+			rec.Price = &price
+		}
+		if err := t.posStore.UpsertLiveOrder(context.Background(), rec); err != nil {
+			return fmt.Errorf("failed to persist opening position for %s: %w", symbol, err)
+		}
+	}
+	if p.TradeID != "" {
+		t.state.ByTradeID[p.TradeID] = symbol
+		t.state.SymbolIndex[symbol] = p.TradeID
+	}
+	return nil
+}
+
+// applyPositionOpened updates the memory state from a facts payload.
+// This is used by both normal execution and replay.
+func (t *Trader) applyPositionOpened(payload json.RawMessage) error {
+	var p PositionOpenedPayload
+	if err := json.Unmarshal(payload, &p); err != nil {
+		return fmt.Errorf("invalid payload for position_opened: %w", err)
+	}
+	symbol := normalizeSymbol(p.Symbol)
+	if symbol == "" {
+		return fmt.Errorf("position_opened missing symbol")
+	}
+
+	openedAt := p.OpenedAt
+	if openedAt.IsZero() {
+		openedAt = time.Now()
+	}
+
+	side := strings.ToLower(strings.TrimSpace(p.Side))
+	tradeID := 0
+	if strings.TrimSpace(p.TradeID) != "" {
+		if id, err := strconv.Atoi(strings.TrimSpace(p.TradeID)); err == nil {
+			tradeID = id
+		} else {
+			logger.Warnf("TradeID %s is not numeric, skipping DB mapping", p.TradeID)
+		}
+	}
+
+	// Persist first to guarantee disk success before touching memory state.
+	if t.posStore != nil && tradeID > 0 {
+		ctx := context.Background()
+		var rec database.LiveOrderRecord
+		if prev, ok, err := t.posStore.GetLivePosition(ctx, tradeID); err != nil {
+			logger.Warnf("failed to load previous position record trade=%d symbol=%s: %v", tradeID, symbol, err)
+		} else if ok {
+			rec = prev
+		}
+
+		rec.FreqtradeID = tradeID
+		rec.Symbol = symbol
+		rec.Side = side
+		rec.Status = database.LiveOrderStatusOpen
+		rec.StartTime = &openedAt
+
+		if p.Amount > 0 {
+			amount := p.Amount
+			rec.Amount = &amount
+			if rec.InitialAmount == nil || *rec.InitialAmount <= 0 {
+				rec.InitialAmount = &amount
+			}
+		}
+		if p.Price > 0 {
+			price := p.Price
+			rec.Price = &price
+		}
+		if p.Stake > 0 {
+			stake := p.Stake
+			rec.StakeAmount = &stake
+			if rec.PositionValue == nil || *rec.PositionValue <= 0 {
+				rec.PositionValue = &stake
+			}
+		}
+		if p.Leverage > 0 {
+			lev := p.Leverage
+			rec.Leverage = &lev
+		}
+
+		if rec.CreatedAt.IsZero() {
+			rec.CreatedAt = openedAt
+		}
+		rec.UpdatedAt = openedAt
+
+		if err := t.posStore.UpsertLiveOrder(ctx, rec); err != nil {
+			return fmt.Errorf("failed to persist position to DB for %s: %w", symbol, err)
+		}
+	}
+
+	// Update State
+	pos := &exchange.Position{
+		ID:            strings.TrimSpace(p.TradeID),
+		Symbol:        symbol,
+		Side:          side,
+		Amount:        p.Amount,
+		InitialAmount: p.Amount,
+		EntryPrice:    p.Price,
+		Leverage:      p.Leverage,
+		StakeAmount:   p.Stake,
+		OpenedAt:      openedAt,
+		UpdatedAt:     openedAt,
+		IsOpen:        true,
+	}
+	t.state.Positions[symbol] = pos
+
+	// Update Index
+	if p.TradeID != "" {
+		t.state.ByTradeID[p.TradeID] = symbol
+		t.state.SymbolIndex[symbol] = p.TradeID
+	}
+
+	t.refreshSnapshot(true)
+
+	logger.Infof("State Updated: Position opened for %s (ID: %s)", symbol, p.TradeID)
+	return nil
+}
+
+// applyPositionClosing updates state when exit order is submitted.
+func (t *Trader) applyPositionClosing(payload json.RawMessage) error {
+	var p PositionClosingPayload
+	if err := json.Unmarshal(payload, &p); err != nil {
+		return fmt.Errorf("invalid payload for position_closing: %w", err)
+	}
+	if t.posStore != nil {
+		if id, err := strconv.Atoi(strings.TrimSpace(p.TradeID)); err == nil && id > 0 {
+			if err := t.posStore.UpdateOrderStatus(context.Background(), id, database.LiveOrderStatusClosingFull); err != nil {
+				return fmt.Errorf("failed to mark trade %d closing: %w", id, err)
+			}
+		}
+	}
+	return nil
+}
+
+// applyPositionClosed updates memory and DB for a closed trade fact.
+func (t *Trader) applyPositionClosed(payload json.RawMessage) error {
+	var p PositionClosedPayload
+	if err := json.Unmarshal(payload, &p); err != nil {
+		return fmt.Errorf("invalid payload for position_closed: %w", err)
+	}
+
+	symbol := normalizeSymbol(p.Symbol)
+	if symbol == "" && p.TradeID != "" {
+		if sym, ok := t.state.ByTradeID[p.TradeID]; ok {
+			symbol = sym
+		}
+	}
+	if symbol == "" {
+		return fmt.Errorf("position_closed missing symbol and trade id")
+	}
+
+	pos, exists := t.state.Positions[symbol]
+	const eps = 1e-8
+	remaining := p.RemainingAmount
+	fullClose := remaining <= eps
+
+	if !fullClose {
+		if exists && pos != nil {
+			pos.Amount = remaining
+			pos.UpdatedAt = time.Now()
+		}
+		if t.posStore != nil {
+			if id, err := strconv.Atoi(strings.TrimSpace(p.TradeID)); err == nil && id > 0 {
+				if err := t.posStore.UpdateOrderStatus(context.Background(), id, database.LiveOrderStatusClosingPartial); err != nil {
+					return fmt.Errorf("failed to mark trade %d partial: %w", id, err)
+				}
+			}
+		}
+		t.refreshSnapshot(true)
+		logger.Infof("State Updated: Position partially closed for %s, 剩余 %.4f", symbol, remaining)
+		return nil
+	}
+
+	if exists {
+		delete(t.state.Positions, symbol)
+	}
+	if p.TradeID != "" {
+		delete(t.state.ByTradeID, p.TradeID)
+		delete(t.state.Plans, p.TradeID)
+	}
+	delete(t.state.SymbolIndex, symbol)
+
+	if t.posStore != nil {
+		if id, err := strconv.Atoi(strings.TrimSpace(p.TradeID)); err == nil && id > 0 {
+			if err := t.posStore.UpdateOrderStatus(context.Background(), id, database.LiveOrderStatusClosed); err != nil {
+				return fmt.Errorf("failed to mark trade %d closed: %w", id, err)
+			}
+		}
+	}
+
+	t.refreshSnapshot(true)
+	logger.Infof("State Updated: Position closed for %s (ID: %s)", symbol, p.TradeID)
+	return nil
+}

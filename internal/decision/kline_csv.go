@@ -1,6 +1,7 @@
 package decision
 
 import (
+	"fmt"
 	"math"
 	"strconv"
 	"strings"
@@ -9,18 +10,11 @@ import (
 	"brale/internal/market"
 )
 
-// CandleCSVOptions 控制 CSV 数据行的时间格式与精度。
+// CandleCSVOptions 控制 K 线 CSV 的元信息与精度。
 type CandleCSVOptions struct {
-	DateOnly       bool
 	Location       *time.Location
 	PricePrecision int
-}
-
-// CandleCSVBlockOptions 控制完整 block 的渲染。
-type CandleCSVBlockOptions struct {
-	CandleCSVOptions
-	StageTitle string
-	BlockTag   string
+	Interval       string
 }
 
 const (
@@ -43,19 +37,20 @@ func BuildCandleCSV(candles []market.Candle, opts CandleCSVOptions) string {
 	if precision == PrecisionAuto {
 		precision = autoPrecisionFromCandles(candles)
 	}
-	header := "Time"
-	if opts.DateOnly {
-		header = "Date"
-	}
 	var b strings.Builder
-	b.WriteString(header + ",O,H,L,C,V,Trades\n")
-	for _, c := range candles {
-		ts := time.UnixMilli(c.CloseTime).In(loc)
-		label := ts.Format("01-02 15:04")
-		if opts.DateOnly {
-			label = ts.Format("06-01-02")
-		}
-		b.WriteString(label)
+	metaParts := []string{}
+	start := firstTimestamp(candles)
+	if start != 0 {
+		metaParts = append(metaParts, fmt.Sprintf("WindowStart=%s", time.UnixMilli(start).In(loc).Format(time.RFC3339)))
+	}
+	if iv := strings.TrimSpace(opts.Interval); iv != "" {
+		metaParts = append(metaParts, fmt.Sprintf("Interval=%s", strings.ToUpper(iv)))
+	}
+	metaParts = append(metaParts, "Order=OLDEST->NEWEST")
+	b.WriteString("# " + strings.Join(metaParts, " ") + "\n")
+	b.WriteString("Index,O,H,L,C,V\n")
+	for idx, c := range candles {
+		b.WriteString(strconv.Itoa(idx + 1))
 		b.WriteByte(',')
 		b.WriteString(formatPrice(c.Open, precision))
 		b.WriteByte(',')
@@ -66,34 +61,8 @@ func BuildCandleCSV(candles []market.Candle, opts CandleCSVOptions) string {
 		b.WriteString(formatPrice(c.Close, precision))
 		b.WriteByte(',')
 		b.WriteString(formatPlainFloat(c.Volume))
-		b.WriteByte(',')
-		b.WriteString(strconv.FormatInt(c.Trades, 10))
 		b.WriteByte('\n')
 	}
-	return b.String()
-}
-
-// RenderCandleCSVBlock 输出带 `## title` 与 `[TAG_*]` 包裹的 block。
-func RenderCandleCSVBlock(candles []market.Candle, opts CandleCSVBlockOptions) string {
-	data := BuildCandleCSV(candles, opts.CandleCSVOptions)
-	if data == "" {
-		return ""
-	}
-	tag := strings.TrimSpace(opts.BlockTag)
-	if tag == "" {
-		tag = "DATA"
-	}
-	tag = strings.ToUpper(tag)
-	var b strings.Builder
-	if title := strings.TrimSpace(opts.StageTitle); title != "" {
-		b.WriteString("## " + title + "\n")
-	}
-	b.WriteString("[" + tag + "_START]\n")
-	b.WriteString(data)
-	if !strings.HasSuffix(data, "\n") {
-		b.WriteByte('\n')
-	}
-	b.WriteString("[" + tag + "_END]\n")
 	return b.String()
 }
 
@@ -130,4 +99,14 @@ func formatPrice(value float64, precision int) string {
 
 func formatPlainFloat(value float64) string {
 	return strconv.FormatFloat(value, 'f', -1, 64)
+}
+
+func firstTimestamp(candles []market.Candle) int64 {
+	if len(candles) == 0 {
+		return 0
+	}
+	if ts := candles[0].OpenTime; ts != 0 {
+		return ts
+	}
+	return candles[0].CloseTime
 }

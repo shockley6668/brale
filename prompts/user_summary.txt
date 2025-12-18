@@ -1,7 +1,7 @@
-# 决策输入（Multi-Agent 汇总）
-{{if .LastDecisions}}{{.LastDecisions}}{{end}}
-{{if .Positions}}{{.Positions}}{{end}}
+{{if .Account}}{{.Account}}{{end}}
+{{if .Previous}}{{.Previous}}{{end}}
 {{if .Derivatives}}{{.Derivatives}}{{end}}
+{{if .Positions}}{{.Positions}}{{end}}
 {{if .Klines}}{{.Klines}}{{end}}
-{{if .Insights}}{{.Insights}}{{end}}
+{{if .Agents}}{{.Agents}}{{end}}
 {{.Guidelines}}
