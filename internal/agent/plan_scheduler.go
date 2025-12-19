@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"sync"
@@ -505,12 +506,12 @@ func (s *PlanScheduler) adjustTierLevelsPlan(ctx context.Context, tradeID int, p
 	if alias == "" {
 		return fmt.Errorf("tier 组件缺少 component")
 	}
-	waiting, err := waitingTierComponents(index[alias])
+	tierStates, err := tierComponentStates(index[alias])
 	if err != nil {
 		return err
 	}
+	waiting := filterWaitingTiers(tierStates)
 	if len(waiting) == 0 {
-
 		logger.Warnf("%s 无可调整段位 (all triggered?)", alias)
 		return nil
 	}
@@ -518,8 +519,8 @@ func (s *PlanScheduler) adjustTierLevelsPlan(ctx context.Context, tradeID int, p
 	if len(rawTiers) == 0 {
 		return fmt.Errorf("%s 缺少 tiers 参数", alias)
 	}
-	if len(rawTiers) != len(waiting) {
-		return fmt.Errorf("%s tiers 数量应为 %d（剩余可调整段），当前=%d", alias, len(waiting), len(rawTiers))
+	if len(rawTiers) != len(tierStates) {
+		return fmt.Errorf("%s tiers 数量应为 %d（全部段位，包括已触发），当前=%d", alias, len(tierStates), len(rawTiers))
 	}
 	newSum := decimal.Zero
 	updates := make([]map[string]any, len(rawTiers))
@@ -542,9 +543,30 @@ func (s *PlanScheduler) adjustTierLevelsPlan(ctx context.Context, tradeID int, p
 				newSum = newSum.Add(decimal.NewFromFloat(val))
 			}
 		} else {
-			newSum = newSum.Add(decimal.NewFromFloat(waiting[i].Remaining))
+			if tierStates[i].Status == database.StrategyStatusWaiting {
+				newSum = newSum.Add(decimal.NewFromFloat(tierStates[i].Remaining))
+			}
 		}
 		updates[i] = update
+
+		// Guard: triggered/done tiers must keep original target/ratio
+		if tierStates[i].Status != database.StrategyStatusWaiting {
+			target, _ := utils.AsFloat(update["target_price"])
+			if target == 0 {
+				target, _ = utils.AsFloat(update["target"])
+			}
+			ratio, _ := utils.AsFloat(update["ratio"])
+			if ratio == 0 {
+				ratio = tierStates[i].Ratio
+			}
+			const tol = 1e-9
+			if target != 0 && math.Abs(target-tierStates[i].Target) > tol {
+				return fmt.Errorf("%s 已触发段 %s 的 target_price 不可修改", alias, tierStates[i].Component)
+			}
+			if ratio != 0 && math.Abs(ratio-tierStates[i].Ratio) > tol {
+				return fmt.Errorf("%s 已触发段 %s 的 ratio 不可修改", alias, tierStates[i].Component)
+			}
+		}
 	}
 	oldSum := decimal.Zero
 	for _, info := range waiting {
@@ -624,6 +646,53 @@ func waitingTierComponents(recs []database.StrategyInstanceRecord) ([]tierCompon
 	}
 	sort.Slice(waiting, func(i, j int) bool { return waiting[i].Component < waiting[j].Component })
 	return waiting, nil
+}
+
+type tierComponentState struct {
+	Component string
+	Status    database.StrategyStatus
+	Target    float64
+	Ratio     float64
+	Remaining float64
+}
+
+func tierComponentStates(recs []database.StrategyInstanceRecord) ([]tierComponentState, error) {
+	if len(recs) == 0 {
+		return nil, nil
+	}
+	out := make([]tierComponentState, 0, len(recs))
+	for _, rec := range recs {
+		if !strings.Contains(rec.PlanComponent, ".tier") {
+			continue
+		}
+		state, err := exit.DecodeTierComponentState(rec.StateJSON)
+		if err != nil {
+			return nil, fmt.Errorf("解析组件 %s 状态失败: %w", rec.PlanComponent, err)
+		}
+		out = append(out, tierComponentState{
+			Component: strings.TrimSpace(rec.PlanComponent),
+			Status:    rec.Status,
+			Target:    state.TargetPrice,
+			Ratio:     state.Ratio,
+			Remaining: state.RemainingRatio,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Component < out[j].Component })
+	return out, nil
+}
+
+func filterWaitingTiers(list []tierComponentState) []tierComponentInfo {
+	waiting := make([]tierComponentInfo, 0, len(list))
+	for _, t := range list {
+		if t.Status != database.StrategyStatusWaiting {
+			continue
+		}
+		waiting = append(waiting, tierComponentInfo{
+			Component: t.Component,
+			Remaining: t.Remaining,
+		})
+	}
+	return waiting
 }
 
 func componentAlias(name string) string {

@@ -5,8 +5,10 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"brale/internal/app"
 	brcfg "brale/internal/config"
@@ -14,7 +16,9 @@ import (
 )
 
 func main() {
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	cfgPath := os.Getenv("BRALE_CONFIG")
 	if cfgPath == "" {
 		cfgPath = "configs/config.yaml"
@@ -53,13 +57,22 @@ func main() {
 	logger.EnableLLMPayloadDump(cfg.App.LLMDump)
 	logger.Infof("✓ 配置加载成功（环境=%s，profiles=%s）", cfg.App.Env, cfg.AI.ProfilesPath)
 
-	app, err := app.NewApp(cfg)
+	application, err := app.NewApp(cfg)
 	if err != nil {
 		log.Fatalf("初始化应用失败: %v", err)
 	}
-	if err := app.Run(ctx); err != nil {
-		log.Fatalf("运行失败: %v", err)
+
+	// 运行应用，当 context 被取消（收到信号）时会触发清理
+	if err := application.Run(ctx); err != nil {
+		// context.Canceled 是正常的优雅关闭
+		if ctx.Err() == context.Canceled {
+			logger.Infof("✓ 收到关闭信号，正在优雅关闭...")
+		} else {
+			log.Fatalf("运行失败: %v", err)
+		}
 	}
+
+	logger.Infof("✓ 应用已安全退出，数据库已刷新")
 }
 
 func setupLogOutput(path string) (*os.File, error) {

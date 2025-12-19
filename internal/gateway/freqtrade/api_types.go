@@ -24,8 +24,6 @@ type APIPosition struct {
 	CurrentPrice       float64                `json:"current_price,omitempty"`
 	PnLRatio           float64                `json:"pnl_ratio,omitempty"`
 	PnLUSD             float64                `json:"pnl_usd,omitempty"`
-	RealizedPnLRatio   float64                `json:"realized_pnl_ratio,omitempty"`
-	RealizedPnLUSD     float64                `json:"realized_pnl_usd,omitempty"`
 	UnrealizedPnLRatio float64                `json:"unrealized_pnl_ratio,omitempty"`
 	UnrealizedPnLUSD   float64                `json:"unrealized_pnl_usd,omitempty"`
 	RemainingRatio     float64                `json:"remaining_ratio,omitempty"`

@@ -111,6 +111,12 @@ a:hover {
     color: var(--accent-blue);
 }
 
+.input.range {
+    height: 8px;
+    padding: 0;
+    min-height: 8px;
+}
+
 .notion-block {
     background: var(--notion-card);
     border: 1px solid var(--notion-border);
@@ -2010,6 +2016,11 @@ a:hover {
 
 .chart-legend.sl {
     color: #ef4444;
+}
+
+.chart-legend.note {
+    color: #4b5563;
+    font-weight: 500;
 }
 
 .chart-price-levels {

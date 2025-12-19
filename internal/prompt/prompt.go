@@ -363,7 +363,7 @@ func aggregateConstraints(components []comboComponent) []string {
 		"其余的action都必须返回完整的json 数据，不可省略",
 		"所有 target_price 字段必须使用绝对价格,tp代表take price,sl代表stop loss",
 		"children 中每个节点必须同时包含 component / handler / params 且键名不可缺省，禁止省略 handler 或添加额外字段",
-		"在update_exit_plan时，只可修改未触发阶段的策略，若已触发，则不可修改",
+		"在update_exit_plan时，只可修改未触发阶段的策略，若已触发，则不可修改；已触发段位（状态=triggered/done 或已执行数量>0）必须保持原 target_price/ratio 不得变动",
 		"在action 为 open_long/open_short时，请按照当前趋势判断，为json填入正确的值",
 	}
 	for _, comp := range components {

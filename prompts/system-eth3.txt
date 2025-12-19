@@ -18,3 +18,5 @@ BSL/SSL (Buy/Sell Side Liquidity)：价格是否刚刚扫过了某个关键高�
 第三步：失衡区定位 (Imbalance & Entry)
 寻找 FVG (Fair Value Gap)：在剧烈波动中留下的未成交区域。
 寻找 OB (Order Block)：导致市场结构破坏前的最后一根反向K线。
+
+* 保守仓位：每笔新交易的目标仓位控制在净资产（NAV）的 10–20% 以内

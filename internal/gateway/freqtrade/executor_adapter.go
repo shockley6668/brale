@@ -30,7 +30,6 @@ func (a *Adapter) Name() string {
 }
 
 func (a *Adapter) OpenPosition(ctx context.Context, req exchange.OpenRequest) (*exchange.OpenResult, error) {
-
 	payload := ForceEnterPayload{
 		Pair:        a.toFreqtradePair(req.Symbol),
 		Side:        req.Side,
@@ -49,7 +48,10 @@ func (a *Adapter) OpenPosition(ctx context.Context, req exchange.OpenRequest) (*
 
 	resp, err := a.client.ForceEnter(ctx, payload)
 	if err != nil {
-		return nil, fmt.Errorf("freqtrade forceenter failed: %w", err)
+		// Try to enrich error context with available balance to make 4xx/5xx easier to diagnose.
+		avail := a.lookupAvailableStake(ctx)
+		logger.Errorf("freqtrade forceenter failed (pair=%s side=%s stake=%.4f lev=%.2f avail=%.4f): %v", payload.Pair, payload.Side, payload.StakeAmount, payload.Leverage, avail, err)
+		return nil, fmt.Errorf("freqtrade forceenter failed (stake=%.4f, leverage=%.2f, available=%.4f): %w", payload.StakeAmount, payload.Leverage, avail, err)
 	}
 
 	return &exchange.OpenResult{
@@ -87,6 +89,7 @@ func (a *Adapter) ClosePosition(ctx context.Context, req exchange.CloseRequest) 
 	logger.Infof("Adapter ClosePosition: %s (TradeID: %s)", req.Symbol, tradeID)
 
 	if err := a.client.ForceExit(ctx, payload); err != nil {
+		logger.Errorf("freqtrade forceexit failed (symbol=%s tradeID=%s amount=%.4f): %v", req.Symbol, tradeID, payload.Amount, err)
 		return fmt.Errorf("freqtrade forceexit failed: %w", err)
 	}
 
@@ -99,6 +102,7 @@ func (a *Adapter) ListOpenPositions(ctx context.Context) ([]exchange.Position, e
 	}
 	trades, err := a.client.ListTrades(ctx)
 	if err != nil {
+		logger.Errorf("freqtrade list trades failed: %v", err)
 		return nil, err
 	}
 	positions := make([]exchange.Position, 0, len(trades))
@@ -124,7 +128,7 @@ func (a *Adapter) GetPosition(ctx context.Context, positionID string) (*exchange
 
 	tr, err := a.client.GetTrade(ctx, id)
 	if err != nil {
-
+		logger.Errorf("freqtrade get trade failed id=%d: %v", id, err)
 		return nil, err
 	}
 	if tr == nil {
@@ -138,11 +142,26 @@ func (a *Adapter) GetBalance(ctx context.Context) (exchange.Balance, error) {
 	if a == nil || a.client == nil {
 		return exchange.Balance{}, fmt.Errorf("freqtrade adapter not initialized")
 	}
-	return a.client.GetBalance(ctx)
+	bal, err := a.client.GetBalance(ctx)
+	if err != nil {
+		logger.Errorf("freqtrade get balance failed: %v", err)
+	}
+	return bal, err
 }
 
 func (a *Adapter) GetPrice(ctx context.Context, symbol string) (exchange.PriceQuote, error) {
 	return exchange.PriceQuote{}, fmt.Errorf("GetPrice not implemented for freqtrade")
+}
+
+func (a *Adapter) lookupAvailableStake(ctx context.Context) float64 {
+	if a == nil {
+		return 0
+	}
+	bal, err := a.GetBalance(ctx)
+	if err != nil {
+		return 0
+	}
+	return bal.Available
 }
 
 func (a *Adapter) toFreqtradePair(sym string) string {
@@ -185,8 +204,6 @@ func (a *Adapter) tradeToExchangePosition(t *Trade) *exchange.Position {
 
 		UnrealizedPnL:      t.ProfitAbs,
 		UnrealizedPnLRatio: t.ProfitRatio,
-		RealizedPnL:        t.CloseProfitAbs,
-		RealizedPnLRatio:   t.CloseProfit,
 		CurrentPrice:       t.CurrentRate,
 	}
 }

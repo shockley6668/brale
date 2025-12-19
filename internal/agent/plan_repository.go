@@ -411,11 +411,17 @@ func fieldLabel(component, key string) string {
 		}
 	}
 	base := componentDisplayName(component)
+	if root, tier := componentRole(component); root != "" {
+		base = root
+		if tier != "" {
+			base = fmt.Sprintf("%s·%s", root, tier)
+		}
+	}
 	switch key {
 	case "ratio":
-		return base + "止盈比例"
+		return base + "比例"
 	case "target_price":
-		return base + "止盈价"
+		return base + "价格"
 	case "status":
 		return base + "状态"
 	default:
@@ -431,6 +437,32 @@ func componentDisplayName(component string) string {
 		}
 	}
 	return component
+}
+
+// componentRole returns human-friendly root ("止盈"/"止损") and tier label ("第一目标"...) if present.
+func componentRole(component string) (string, string) {
+	comp := strings.ToLower(strings.TrimSpace(component))
+	if comp == "" {
+		return "", ""
+	}
+	parts := strings.Split(comp, ".")
+	root := parts[0]
+	var tierLabel string
+	if len(parts) > 1 {
+		if strings.HasPrefix(parts[1], "tier") {
+			if idx, err := strconv.Atoi(strings.TrimPrefix(parts[1], "tier")); err == nil {
+				tierLabel = ordinalTierName(idx)
+			}
+		}
+	}
+	switch {
+	case strings.HasPrefix(root, "tp"):
+		return "止盈", tierLabel
+	case strings.HasPrefix(root, "sl"):
+		return "止损", tierLabel
+	default:
+		return strings.ToUpper(root), tierLabel
+	}
 }
 
 func ordinalTierName(idx int) string {

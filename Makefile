@@ -1,9 +1,9 @@
 BIN_DIR := bin
 BIN := $(BIN_DIR)/brale
 
-# 运行时数据根目录（统一放在 running_log 下）
-BRALE_DATA_ROOT := $(CURDIR)/running_log/brale_data
-FREQTRADE_USERDATA_ROOT := $(CURDIR)/running_log/freqtrade_data
+# 运行时数据根目录（固定到 ./data 下，避免 stop/start 丢失）
+BRALE_DATA_ROOT := $(CURDIR)/data/brale_data
+FREQTRADE_USERDATA_ROOT := $(CURDIR)/data/freqtrade_data
 
 DOCKER_COMPOSE := BRALE_DATA_ROOT=$(BRALE_DATA_ROOT) FREQTRADE_USERDATA_ROOT=$(FREQTRADE_USERDATA_ROOT) docker compose
 
@@ -63,8 +63,6 @@ logs:
 start:
 	@echo "停止现有容器..."
 	-$(DOCKER_COMPOSE) down
-	@echo "清理运行目录：$(CURDIR)/running_log"
-	sudo rm -rf $(CURDIR)/running_log
 	$(MAKE) prepare-dirs
 	@echo "构建 brale 镜像..."
 	$(DOCKER_COMPOSE) build brale
@@ -96,4 +94,4 @@ start:
 	$(DOCKER_COMPOSE) up -d brale
 
 bs:
-	$(DOCKER_COMPOSE) up --build
+	$(DOCKER_COMPOSE) up brale --build

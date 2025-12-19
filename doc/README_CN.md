@@ -8,7 +8,7 @@
 [![Go Version](https://img.shields.io/badge/go-1.24.0-blue.svg)](../go.mod)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](../LICENSE)
 
-**Brale** 是一个将 **“AI 的深度思考”** 与 **“量化的极致执行”** 完美解耦的量化交易系统。它通过多 Agent 协同分析（趋势、形态、动能），结合 LLM（GPT-4o, Claude 3.5, DeepSeek）生成高胜率决策，并由高度优化的执行引擎进行毫秒级风险对齐。
+**Brale** 是一个将 **“AI 的深度思考”** 与 **“量化的极致执行”** 完美解耦的量化交易系统。它通过多 Agent 协同分析（趋势、形态、动能），结合 LLM（GPT, Claude, DeepSeek...）生成高胜率决策，并由高度优化的执行引擎进行毫秒级风险对齐。
 [中文视频介绍](https://www.bilibili.com/video/BV1Ab2aB2EUY) 
 ## ✨ 核心特性
 
@@ -29,7 +29,6 @@
 
 ![架构图](Reasoning-Edition.png)
 
-```mermaid
 ## ⚠️ 风险免责声明
 
 **Brale 是一个用于量化交易研究和开发的开源工具，它并非金融投资建议。加密货币交易具有高度投机性，并伴随着巨大的风险。您可能会损失部分或全部投资资本。请勿投入您无法承受损失的资金。过往表现不代表未来业绩。使用 Brale 存在固有风险，请自行承担。**

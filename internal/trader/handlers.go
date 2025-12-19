@@ -37,6 +37,9 @@ func (t *Trader) handleSignalEntry(payload json.RawMessage, traceID string) erro
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
+		logger.Infof("Open request -> symbol=%s side=%s amount=%.4f leverage=%.2f price=%.4f",
+			input.Symbol, input.Side, input.Amount, input.Leverage, input.Price)
+
 		result, err := t.executor.OpenPosition(ctx, input)
 		reqID := traceID
 		if reqID == "" {

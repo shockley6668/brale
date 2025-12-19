@@ -18,7 +18,7 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - type: bind
-        source: ${BRALE_DATA_ROOT:-./running_log/brale_data}
+        source: ${BRALE_DATA_ROOT:-./data/brale_data}
         target: /data
       - type: bind
         source: ./configs
@@ -58,5 +58,5 @@ services:
       start_period: 10s
     volumes:
       - type: bind
-        source: ${FREQTRADE_USERDATA_ROOT:-./running_log/freqtrade_data}
+        source: ${FREQTRADE_USERDATA_ROOT:-./data/freqtrade_data}
         target: /freqtrade/user_data

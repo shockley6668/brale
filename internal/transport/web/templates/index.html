@@ -190,7 +190,7 @@
                                     <div class="text-right">
                                         <div class="pos-pnl" :class="p.pnl_ratio>0 ? 'positive' : (p.pnl_ratio<0 ? 'negative' : '')">[[ formatUSD(p.pnl_usd) ]]</div>
                                         <div class="pos-sub">ROE [[ formatPercent(p.pnl_ratio) ]]</div>
-                                        <div class="pos-sub mt-2">已实现 [[ formatUSD(p.realized_pnl_usd) ]]</div>
+                                        <!-- realized pnl removed -->
                                         <div class="pos-sub">未实现 [[ formatUSD(p.unrealized_pnl_usd) ]]</div>
                                         <div class="pos-sub mt-2">SL [[ formatNumber(p.stop_loss) ]] / TP [[ formatNumber(p.take_profit) ]]</div>
                                     </div>
@@ -575,7 +575,7 @@
                                 <div class="text-right">
                                     <div class="pos-pnl" :class="p.pnl_ratio>0 ? 'positive' : (p.pnl_ratio<0 ? 'negative' : '')">[[ formatUSD(p.pnl_usd) ]]</div>
                                     <div class="pos-sub">ROE [[ formatPercent(p.pnl_ratio) ]]</div>
-                                    <div class="pos-sub mt-2">已实现 [[ formatUSD(p.realized_pnl_usd) ]]</div>
+                                    <!-- realized pnl removed -->
                                     <div class="pos-sub">未实现 [[ formatUSD(p.unrealized_pnl_usd) ]]</div>
                                     <div class="pos-sub mt-2">SL [[ p.stop_loss ? formatNumber(p.stop_loss) : '--' ]] / TP [[ p.take_profit ? formatNumber(p.take_profit) : '--' ]]</div>
                                     <div class="pos-sub">距 SL [[ formatPercent(stopLossDistancePct(p)) ]] · 最近触发线 [[ formatPercent(nearestTriggerDistancePct(p)) ]]</div>
@@ -613,7 +613,7 @@
                                         [[ p.pnl_ratio>0 ? '已盈利 ' : (p.pnl_ratio<0 ? '已亏损 ' : '') ]][[ formatUSD(p.pnl_usd) ]]
                                     </div>
                                     <div class="pos-sub">ROE [[ formatPercent(p.pnl_ratio) ]]</div>
-                                    <div class="pos-sub mt-2">已实现 [[ formatUSD(p.realized_pnl_usd !== undefined ? p.realized_pnl_usd : p.pnl_usd) ]]</div>
+                                    <!-- realized pnl removed -->
                                 </div>
                             </div>
                         </div>
@@ -622,18 +622,17 @@
 
                 <section v-if="view==='manualOpen'" class="stack">
                     <div class="notion-block">
-                        <div class="block-header">
-                            <div>
-                                <p class="notion-section-title">Manual Trade</p>
-                                <h2>手动开仓（免审）</h2>
-                                <p class="muted">⚠️ 该操作跳过 AI 审查，直接推送至 Freqtrade，请谨慎填写每一个参数。</p>
-                            </div>
+                            <div class="block-header">
+                                <div>
+                                    <p class="notion-section-title">Manual Trade</p>
+                                    <h2>手动开仓（免审）</h2>
+                                    <p class="muted">⚠️ 该操作跳过 AI 审查，直接推送至 Freqtrade，请谨慎填写每一个参数。</p>
+                                </div>
                             <div class="actions items-end">
                                 <div class="text-right mr-4">
                                     <p class="muted">最新价 [[ formatNumber(manualOpen.price.last) ]]</p>
                                     <p class="muted text-xs">H [[ formatNumber(manualOpen.price.high) ]] · L [[ formatNumber(manualOpen.price.low) ]]</p>
                                 </div>
-                                <button class="pill-btn" @click="loadManualPrice" :disabled="manualOpen.loadingPrice || !manualOpen.symbol">刷新价格</button>
                             </div>
                         </div>
                         <div class="callout warning">
@@ -664,13 +663,26 @@
 	                                <span>杠杆</span>
 	                                <input class="input" type="number" min="1" step="1" v-model.number="manualOpen.leverage">
 	                            </label>
-	                            <label class="form-row col-span-4">
-	                                <span>开仓价格</span>
-	                                <div class="flex gap-2">
-	                                    <input class="input" type="number" min="0" step="0.0001" v-model.number="manualOpen.entry_price">
-	                                    <button class="pill-btn" @click="fillEntryPriceFromLast" :disabled="manualOpen.loadingPrice">获取当前价</button>
-	                                </div>
-	                            </label>
+                            <label class="form-row col-span-4">
+                                <span>开仓价格</span>
+                                <div class="flex gap-2 items-center">
+                                    <input class="input" type="number" min="0" step="0.0001" v-model.number="manualOpen.entry_price">
+                                    <button class="pill-btn" @click="fetchAndFillEntryPrice" :disabled="manualOpen.loadingPrice || !manualOpen.symbol">获取当前价</button>
+                                </div>
+                                <div class="mt-2 flex items-center gap-4">
+                                    <div class="flex-1">
+                                        <div class="flex justify-between text-xs muted mb-1">
+                                            <span>止盈偏移 [[ formatPercent(manualOpen.tp_pct) ]]</span>
+                                            <span>止损偏移 [[ formatPercent(manualOpen.sl_pct) ]]</span>
+                                        </div>
+                                        <div class="flex items-center gap-2">
+                                            <input class="input range" type="range" min="0" max="0.1" step="0.001" v-model.number="manualOpen.tp_pct" @input="applyPctTargets">
+                                            <input class="input range" type="range" min="0" max="0.1" step="0.001" v-model.number="manualOpen.sl_pct" @input="applyPctTargets">
+                                        </div>
+                                        <p class="muted text-xs mt-1">拖动可快速填充单段止盈/止损价格，也可手动输入。</p>
+                                    </div>
+                                </div>
+                            </label>
 
 	                            <label class="form-row col-span-4">
 	                                <span>仓位（USD）</span>
@@ -798,42 +810,29 @@
                                 <div v-else>
                                     <div v-if="positionDetail.error" class="callout error">[[ positionDetail.error ]]</div>
                                     <div v-if="positionDetail.data" class="detail-grid">
-                                <div class="detail-card">
-                                    <p class="muted">标的 / 方向</p>
-                                    <h3>[[ positionDetail.data.symbol ]] · [[ (positionDetail.data.side || '').toUpperCase() ]] x[[ positionDetail.data.leverage ]]</h3>
-                                    <p class="muted">Entry [[ formatNumber(positionDetail.data.entry_price) ]] · Current [[ formatNumber(positionDetail.data.current_price) ]]</p>
-                                </div>
-                                <div class="detail-card">
-                                    <p class="muted">状态</p>
-                                    <div class="flex items-center gap-2">
-                                        <span class="pos-status" :class="statusBadgeClass(positionDetail.data.status)">
-                                            [[ statusLabel(positionDetail.data.status) ]]
-                                        </span>
-                                        <span class="muted text-sm">
-                                            Remaining [[ positionDetail.data.status==='closed' ? '0%' : formatPercent(positionDetail.data.remaining_ratio || 1) ]]
-                                        </span>
+                                        <div class="detail-card">
+                                            <p class="muted">标的 / 方向</p>
+                                            <h3>[[ positionDetail.data.symbol ]] · [[ (positionDetail.data.side || '').toUpperCase() ]] x[[ positionDetail.data.leverage ]]</h3>
+                                            <p class="muted">Entry [[ formatNumber(positionDetail.data.entry_price) ]] · Current [[ formatNumber(positionDetail.data.current_price) ]]</p>
+                                        </div>
+                                        <div class="detail-card">
+                                            <p class="muted">盈亏</p>
+                                            <div class="flex justify-between items-center">
+                                                <h3 :class="positionDetail.data.pnl_ratio>0 ? 'text-emerald-600' : (positionDetail.data.pnl_ratio<0 ? 'text-red-600' : '')">[[ formatUSD(positionDetail.data.pnl_usd) ]]</h3>
+                                                <button class="pill-btn sm"
+                                                        @click="refreshPositionPnL"
+                                                        :disabled="positionDetail.pnlRefreshing || positionDetail.loading">
+                                                    刷新盈亏
+                                                </button>
+                                            </div>
+                                            <p class="muted">ROE [[ formatPercent(positionDetail.data.pnl_ratio) ]]</p>
+                                        </div>
+                                        <div class="detail-card">
+                                            <p class="muted">仓位价值 / 保证金</p>
+                                            <h3>名义价值 [[ formatNumber(positionDetail.data.position_value) ]] / 保证金 [[ formatNumber(positionDetail.data.stake) ]]</h3>
+                                            <p class="muted">已持有 [[ formatDuration(positionDetail.data.holding_ms) ]]</p>
+                                        </div>
                                     </div>
-                                    <p class="muted mt-2">已持有 [[ formatDuration(positionDetail.data.holding_ms) ]]</p>
-                                </div>
-                                <div class="detail-card">
-                                    <div class="flex justify-between items-center">
-                                        <p class="muted">盈亏</p>
-                                        <button class="pill-btn sm"
-                                                @click="refreshPositionPnL"
-                                                :disabled="positionDetail.pnlRefreshing || positionDetail.loading">
-                                            刷新盈亏
-                                        </button>
-                                    </div>
-                                    <h3 :class="positionDetail.data.pnl_ratio>0 ? 'text-emerald-600' : (positionDetail.data.pnl_ratio<0 ? 'text-red-600' : '')">[[ formatUSD(positionDetail.data.pnl_usd) ]]</h3>
-                                    <p class="muted">ROE [[ formatPercent(positionDetail.data.pnl_ratio) ]]</p>
-                                    <p class="muted">已实现 [[ formatUSD(positionDetail.data.realized_pnl_usd) ]] · 未实现 [[ formatUSD(positionDetail.data.unrealized_pnl_usd) ]]</p>
-                                </div>
-                                <div class="detail-card">
-                                    <p class="muted">仓位价值 / 保证金</p>
-                                    <h3>名义价值 [[ formatNumber(positionDetail.data.position_value) ]] / 保证金 [[ formatNumber(positionDetail.data.stake) ]]</h3>
-                                    <p class="muted">数量 [[ formatNumber(positionDetail.data.amount) ]] / 初始 [[ formatNumber(positionDetail.data.initial_amount) ]]</p>
-                                </div>
-                            </div>
 
                             <!-- TradingView K线图 -->
                             <div class="notion-block mt-4" v-if="positionDetail.data">
@@ -846,6 +845,11 @@
                                         <span class="chart-legend current">━ Current</span>
                                         <span class="chart-legend tp">┅ TP</span>
                                         <span class="chart-legend sl">┅ SL</span>
+                                        <span class="chart-legend note"
+                                              v-if="positionDetail.data.stop_loss || positionDetail.data.take_profit">
+                                            SL [[ formatNumber(positionDetail.data.stop_loss) ]]
+                                            · TP [[ formatNumber(positionDetail.data.take_profit) ]]
+                                        </span>
                                     </div>
                                 </div>
                                 <div class="tradingview-widget-container" style="height: 420px; border-radius: 8px; overflow: hidden;">

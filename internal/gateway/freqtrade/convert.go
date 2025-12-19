@@ -53,18 +53,48 @@ func initLiveRecord(tr *Trade, symbol string, now time.Time, isOpen bool) databa
 }
 
 func applyAmounts(tr *Trade, rec database.LiveOrderRecord, isOpen bool) database.LiveOrderRecord {
+	initAmt := tr.Amount
+	if tr.AmountRequested != 0 {
+		initAmt = tr.AmountRequested
+	}
+	if initAmt != 0 {
+		rec.InitialAmount = ptrFloat(initAmt)
+	}
 	if amt := tr.Amount; amt != 0 {
 		rec.Amount = ptrFloat(amt)
-		rec.InitialAmount = ptrFloat(amt)
 		if !isOpen {
 			rec.ClosedAmount = ptrFloat(amt)
+		}
+	}
+	if isOpen && initAmt > 0 && tr.Amount > 0 {
+		closed := initAmt - tr.Amount
+		if closed > 0 {
+			rec.ClosedAmount = ptrFloat(closed)
 		}
 	}
 	if stake := tr.StakeAmount; stake != 0 {
 		rec.StakeAmount = ptrFloat(stake)
 		rec.PositionValue = ptrFloat(stake)
-	} else if tr.Amount != 0 && tr.OpenRate != 0 {
-		rec.PositionValue = ptrFloat(tr.Amount * tr.OpenRate)
+	}
+	if tr.OpenTradeValue != 0 {
+		rec.PositionValue = ptrFloat(tr.OpenTradeValue)
+		if tr.Leverage != 0 {
+			stake := tr.OpenTradeValue / tr.Leverage
+			if stake != 0 {
+				rec.StakeAmount = ptrFloat(stake)
+			}
+		}
+	}
+	if rec.PositionValue == nil && tr.Amount != 0 && tr.OpenRate != 0 {
+		notional := tr.Amount * tr.OpenRate
+		if tr.Leverage != 0 {
+			notional *= tr.Leverage
+		}
+		rec.PositionValue = ptrFloat(notional)
+	}
+	if rec.StakeAmount == nil && rec.PositionValue != nil && tr.Leverage != 0 {
+		stake := *rec.PositionValue / tr.Leverage
+		rec.StakeAmount = &stake
 	}
 	return rec
 }
@@ -124,11 +154,9 @@ func applyClosedPnL(tr *Trade, rec database.LiveOrderRecord) database.LiveOrderR
 	}
 	if tr.CloseProfit != 0 {
 		rec.PnLRatio = ptrFloat(tr.CloseProfit)
-		rec.RealizedPnLRatio = ptrFloat(tr.CloseProfit)
 	}
 	if tr.CloseProfitAbs != 0 {
 		rec.PnLUSD = ptrFloat(tr.CloseProfitAbs)
-		rec.RealizedPnLUSD = ptrFloat(tr.CloseProfitAbs)
 	}
 	return rec
 }

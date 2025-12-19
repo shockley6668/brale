@@ -2,6 +2,7 @@ package freqtrade
 
 import (
 	"strconv"
+	"strings"
 	"time"
 
 	"brale/internal/gateway/database"
@@ -29,6 +30,41 @@ func liveOrderStatusText(status database.LiveOrderStatus) string {
 	default:
 		return "unknown"
 	}
+}
+
+func effectiveAmount(entry, amount, stake, leverage float64) float64 {
+	if stake > 0 && leverage > 0 && entry > 0 {
+		return (stake * leverage) / entry
+	}
+	return amount
+}
+
+func derivePnL(entry, current, amount, stake, leverage float64, side string) (float64, float64) {
+	if entry <= 0 || current <= 0 {
+		return 0, 0
+	}
+	amt := effectiveAmount(entry, amount, stake, leverage)
+	if amt <= 0 {
+		return 0, 0
+	}
+	dir := 1.0
+	if strings.ToLower(side) == "short" {
+		dir = -1
+	}
+	pnlUSD := (current - entry) * amt * dir
+	base := stake
+	if base <= 0 {
+		lev := leverage
+		if lev <= 0 {
+			lev = 1
+		}
+		base = entry * amount / lev
+	}
+	var pnlRatio float64
+	if base > 0 {
+		pnlRatio = pnlUSD / base
+	}
+	return pnlUSD, pnlRatio
 }
 
 func liveOrderToAPIPosition(rec database.LiveOrderRecord, nowMillis int64) exchange.APIPosition {
@@ -80,8 +116,6 @@ func liveOrderToAPIPosition(rec database.LiveOrderRecord, nowMillis int64) excha
 		CurrentPrice:       currentPrice,
 		PnLRatio:           pnlRatio,
 		PnLUSD:             pnlUSD,
-		RealizedPnLRatio:   valOrZero(rec.RealizedPnLRatio),
-		RealizedPnLUSD:     valOrZero(rec.RealizedPnLUSD),
 		UnrealizedPnLRatio: valOrZero(rec.UnrealizedPnLRatio),
 		UnrealizedPnLUSD:   valOrZero(rec.UnrealizedPnLUSD),
 		Status:             liveOrderStatusText(rec.Status),
@@ -91,15 +125,72 @@ func liveOrderToAPIPosition(rec database.LiveOrderRecord, nowMillis int64) excha
 	if ref <= 0 {
 		ref = out.EntryPrice
 	}
-	if out.Amount > 0 && ref > 0 {
-		out.PositionValue = out.Amount * ref
+	if ref > 0 {
+		amt := effectiveAmount(out.EntryPrice, out.Amount, out.Stake, out.Leverage)
+		if amt > 0 {
+			out.PositionValue = amt * ref
+		}
 	} else if out.Stake > 0 && out.Leverage > 0 {
 		out.PositionValue = out.Stake * out.Leverage
 	}
 
+	baseStake := out.Stake
+	if baseStake <= 0 && out.EntryPrice > 0 {
+		lev := out.Leverage
+		if lev <= 0 {
+			lev = 1
+		}
+		if out.InitialAmount > 0 {
+			baseStake = out.EntryPrice * out.InitialAmount / lev
+		} else if out.Amount > 0 {
+			baseStake = out.EntryPrice * out.Amount / lev
+		}
+	}
+
+	derivedUSD, derivedRatio := derivePnL(out.EntryPrice, out.CurrentPrice, out.Amount, out.Stake, out.Leverage, out.Side)
+
 	if rec.Status != database.LiveOrderStatusClosed && out.UnrealizedPnLUSD == 0 && out.UnrealizedPnLRatio == 0 {
-		out.UnrealizedPnLUSD = pnlUSD
-		out.UnrealizedPnLRatio = pnlRatio
+		if pnlUSD != 0 || pnlRatio != 0 {
+			out.UnrealizedPnLUSD = pnlUSD
+			out.UnrealizedPnLRatio = pnlRatio
+		} else {
+			out.UnrealizedPnLUSD = derivedUSD
+			out.UnrealizedPnLRatio = derivedRatio
+		}
+	}
+
+	if out.PnLUSD == 0 && out.PnLRatio == 0 {
+		if derivedUSD != 0 || derivedRatio != 0 {
+			out.PnLUSD = derivedUSD
+			out.PnLRatio = derivedRatio
+			if rec.Status != database.LiveOrderStatusClosed {
+				if out.UnrealizedPnLUSD == 0 {
+					out.UnrealizedPnLUSD = derivedUSD
+				}
+				if out.UnrealizedPnLRatio == 0 {
+					out.UnrealizedPnLRatio = derivedRatio
+				}
+			}
+		}
+	}
+
+	if rec.Status != database.LiveOrderStatusClosed {
+		totalUSD := out.UnrealizedPnLUSD
+		if totalUSD != 0 {
+			out.PnLUSD = totalUSD
+			if baseStake > 0 {
+				out.PnLRatio = totalUSD / baseStake
+				if out.UnrealizedPnLRatio == 0 && out.UnrealizedPnLUSD != 0 {
+					out.UnrealizedPnLRatio = out.UnrealizedPnLUSD / baseStake
+				}
+			}
+		}
+	}
+
+	if rec.Status == database.LiveOrderStatusClosed {
+		if out.PnLRatio == 0 && baseStake > 0 && out.PnLUSD != 0 {
+			out.PnLRatio = out.PnLUSD / baseStake
+		}
 	}
 
 	out.RemainingRatio = remainingRatio(rec)
@@ -147,8 +238,6 @@ func exchangePositionToAPIPosition(pos exchange.Position, nowMillis int64) excha
 		StopLoss:           pos.StopLoss,
 		TakeProfit:         pos.TakeProfit,
 		CurrentPrice:       currentPrice,
-		RealizedPnLRatio:   pos.RealizedPnLRatio,
-		RealizedPnLUSD:     pos.RealizedPnL,
 		UnrealizedPnLRatio: pos.UnrealizedPnLRatio,
 		UnrealizedPnLUSD:   pos.UnrealizedPnL,
 		Status:             "unknown",
@@ -165,21 +254,37 @@ func exchangePositionToAPIPosition(pos exchange.Position, nowMillis int64) excha
 		out.PnLRatio = out.UnrealizedPnLRatio
 		out.PnLUSD = out.UnrealizedPnLUSD
 	} else {
-		out.PnLRatio = out.RealizedPnLRatio
-		out.PnLUSD = out.RealizedPnLUSD
+		out.PnLRatio = out.UnrealizedPnLRatio
+		out.PnLUSD = out.UnrealizedPnLUSD
 	}
 
 	ref := currentPrice
 	if ref <= 0 {
 		ref = out.EntryPrice
 	}
-	if out.Amount > 0 && ref > 0 {
-		out.PositionValue = out.Amount * ref
+	if ref > 0 {
+		amt := effectiveAmount(out.EntryPrice, out.Amount, out.Stake, out.Leverage)
+		if amt > 0 {
+			out.PositionValue = amt * ref
+		}
 	} else if out.Stake > 0 && out.Leverage > 0 {
 		out.PositionValue = out.Stake * out.Leverage
 	}
 	if out.InitialAmount > 0 && out.Amount > 0 {
 		out.RemainingRatio = out.Amount / out.InitialAmount
+	}
+	if out.PnLUSD == 0 && out.PnLRatio == 0 {
+		derivedUSD, derivedRatio := derivePnL(out.EntryPrice, out.CurrentPrice, out.Amount, out.Stake, out.Leverage, out.Side)
+		if derivedUSD != 0 || derivedRatio != 0 {
+			out.PnLUSD = derivedUSD
+			out.PnLRatio = derivedRatio
+			if out.UnrealizedPnLUSD == 0 {
+				out.UnrealizedPnLUSD = derivedUSD
+			}
+			if out.UnrealizedPnLRatio == 0 {
+				out.UnrealizedPnLRatio = derivedRatio
+			}
+		}
 	}
 	return out
 }

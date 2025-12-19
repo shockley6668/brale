@@ -90,6 +90,27 @@ func (m *Manager) ManualOpenPosition(ctx context.Context, req exchange.ManualOpe
 	if err != nil {
 		return err
 	}
+
+	// Validate exit plan structure before触发开仓，避免开仓成功但策略保存失败
+	reg := exit.NewHandlerRegistry()
+	exithandlers.RegisterCoreHandlers(reg)
+	comboHandler, _ := reg.Handler("combo_group")
+	if comboHandler == nil {
+		return fmt.Errorf("exit plan handler 未注册")
+	}
+	if _, err := comboHandler.Instantiate(ctx, exit.InstantiateArgs{
+		TradeID:       -1, // dry-run
+		PlanID:        "plan_combo_main",
+		PlanVersion:   1,
+		PlanSpec:      planSpec,
+		EntryPrice:    entryPrice,
+		Side:          side,
+		Symbol:        symbol,
+		DecisionTrace: "manual-open:dry-run",
+	}); err != nil {
+		return fmt.Errorf("exit plan 校验失败: %w", err)
+	}
+
 	guardDecision := decision.Decision{
 		Symbol: symbol,
 		Action: "open_" + side,
@@ -125,12 +146,6 @@ func (m *Manager) ManualOpenPosition(ctx context.Context, req exchange.ManualOpe
 		return fmt.Errorf("freqtrade 未返回 trade_id")
 	}
 
-	reg := exit.NewHandlerRegistry()
-	exithandlers.RegisterCoreHandlers(reg)
-	comboHandler, _ := reg.Handler("combo_group")
-	if comboHandler == nil {
-		return fmt.Errorf("exit plan handler 未注册")
-	}
 	planID := "plan_combo_main"
 	decisionTrace := fmt.Sprintf("manual-open:%d", tradeID)
 	instances, err := comboHandler.Instantiate(ctx, exit.InstantiateArgs{
@@ -144,7 +159,13 @@ func (m *Manager) ManualOpenPosition(ctx context.Context, req exchange.ManualOpe
 		DecisionTrace: decisionTrace,
 	})
 	if err != nil {
-		return err
+		_ = m.executor.ClosePosition(ctx, exchange.CloseRequest{
+			PositionID: strconv.Itoa(tradeID),
+			Symbol:     symbol,
+			Side:       side,
+			Amount:     0, // full close
+		})
+		return fmt.Errorf("exit plan 初始化失败，已请求平仓: %w", err)
 	}
 	if m.posStore == nil {
 		return fmt.Errorf("posStore not initialized")

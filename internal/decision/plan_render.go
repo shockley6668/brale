@@ -87,7 +87,7 @@ func renderPlanStateBlock(plan planStateView) string {
 		editable[key] = true
 	}
 	triggered := make([]string, 0, len(plan.Components))
-	available := make([]string, 0, len(plan.Components))
+	waiting := make([]string, 0, len(plan.Components))
 	for _, comp := range plan.Components {
 		base, stage := splitComponentName(comp.Component)
 		if base == "" {
@@ -101,7 +101,7 @@ func renderPlanStateBlock(plan planStateView) string {
 				triggered = append(triggered, trig)
 			}
 			if edit != "" {
-				available = append(available, edit)
+				waiting = append(waiting, edit)
 			}
 		case "tp_atr", "sl_atr":
 			trig, edit := describeATRComponent(base, comp, editable[key])
@@ -109,13 +109,13 @@ func renderPlanStateBlock(plan planStateView) string {
 				triggered = append(triggered, trig)
 			}
 			if edit != "" {
-				available = append(available, edit)
+				waiting = append(waiting, edit)
 			}
 		default:
 			continue
 		}
 	}
-	if len(triggered) == 0 && len(available) == 0 {
+	if len(triggered) == 0 && len(waiting) == 0 {
 		return ""
 	}
 	var b strings.Builder
@@ -125,7 +125,7 @@ func renderPlanStateBlock(plan planStateView) string {
 	}
 	b.WriteString(fmt.Sprintf("    策略：%s (v%d)\n", title, plan.Version))
 	b.WriteString(renderPlanSection("已触发", triggered, "暂无"))
-	b.WriteString(renderPlanSection("可编辑策略 (名称: 目标价 [仓位比例])", available, "暂无可调整组件"))
+	b.WriteString(renderPlanSection("等待触发", waiting, "暂无待触发组件"))
 	return b.String()
 }
 
@@ -164,28 +164,26 @@ func describeTierComponent(base, stage string, comp planComponentView, editable 
 	}
 	label := buildTierLabel(base, stage)
 	status := normalizeStatus(state.Status, comp.Status)
-	if isTriggeredStatus(status) {
+	if tierTriggered(status, state) {
 		price := state.TriggerPrice
 		if price <= 0 {
 			price = target
 		}
 		ratioLabel := ratioPercent(ratio)
+		line := fmt.Sprintf("%s 已触发 触达价 %.2f", label, price)
 		if ratioLabel != "" {
-			return fmt.Sprintf("%s (%s) @ %.2f", label, ratioLabel, price), ""
+			line += fmt.Sprintf(" 比例 %s", ratioLabel)
 		}
-		return fmt.Sprintf("%s @ %.2f", label, price), ""
-	}
-	if !editable {
-		return "", ""
+		return line, ""
 	}
 	priceText := "--"
 	if target > 0 {
 		priceText = fmt.Sprintf("%.2f", target)
 	}
 	ratioLabel := ratioPercent(ratio)
-	line := fmt.Sprintf("%s: %s", label, priceText)
+	line := fmt.Sprintf("%s 待触发 目标价 %s", label, priceText)
 	if ratioLabel != "" {
-		line += fmt.Sprintf(" [%s]", ratioLabel)
+		line += fmt.Sprintf(" 比例 %s", ratioLabel)
 	}
 	return "", line
 }
@@ -210,7 +208,7 @@ func describeATRComponent(base string, comp planComponentView, editable bool) (s
 			triggered = fmt.Sprintf("%s 已触发", label)
 		}
 	}
-	if !editable {
+	if !editable && triggered != "" {
 		return triggered, ""
 	}
 	params := decodeRawMap(comp.Params)
@@ -317,6 +315,19 @@ func ratioPercent(val float64) string {
 		return ""
 	}
 	return formatutil.Percent(val)
+}
+
+func tierTriggered(status string, state tierComponentStateView) bool {
+	if isTriggeredStatus(status) {
+		return true
+	}
+	if state.TriggeredAt > 0 || state.ExecutedRatio > 0 {
+		return true
+	}
+	if state.RemainingRatio > 0 && state.Ratio > 0 && state.RemainingRatio < state.Ratio {
+		return true
+	}
+	return false
 }
 
 func isTriggeredStatus(status string) bool {

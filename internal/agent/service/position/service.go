@@ -53,6 +53,16 @@ func (s *Service) ListPositions(ctx context.Context) ([]decision.PositionSnapsho
 		return nil, nil
 	}
 
+	// Prefer manager-provided enriched snapshots (包含策略状态等)
+	type snapshotProvider interface {
+		Positions() []decision.PositionSnapshot
+	}
+	if sp, ok := s.manager.(snapshotProvider); ok {
+		if snaps := sp.Positions(); len(snaps) > 0 {
+			return snaps, nil
+		}
+	}
+
 	positions, err := s.manager.ListOpenPositions(ctx)
 	if err != nil {
 		return nil, err

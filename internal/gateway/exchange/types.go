@@ -20,8 +20,6 @@ type Position struct {
 
 	UnrealizedPnL      float64
 	UnrealizedPnLRatio float64
-	RealizedPnL        float64
-	RealizedPnLRatio   float64
 	CurrentPrice       float64
 
 	StopLoss   float64
@@ -128,8 +126,6 @@ type APIPosition struct {
 	CurrentPrice       float64 `json:"current_price"`
 	PnLRatio           float64 `json:"pnl_ratio"`
 	PnLUSD             float64 `json:"pnl_usd"`
-	RealizedPnLRatio   float64 `json:"realized_pnl_ratio"`
-	RealizedPnLUSD     float64 `json:"realized_pnl_usd"`
 	UnrealizedPnLRatio float64 `json:"unrealized_pnl_ratio"`
 	UnrealizedPnLUSD   float64 `json:"unrealized_pnl_usd"`
 	RemainingRatio     float64 `json:"remaining_ratio"`

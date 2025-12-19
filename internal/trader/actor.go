@@ -534,7 +534,8 @@ func (t *Trader) handleOrderResult(payload []byte) error {
 		return nil
 	}
 
-	logger.Infof("Async Execution Success for %s, TradeID: %s", res.Symbol, res.OrderID)
+	logger.Infof("Async Execution Success for %s, TradeID: %s action=%s fill=%.6f pnl=%.4f pnl%%=%.4f",
+		res.Symbol, res.TradeID, res.Action, res.FillSize, res.PnL, res.PnLPct)
 
 	switch res.Action {
 	case OrderActionOpen:
@@ -710,6 +711,17 @@ func (t *Trader) dispatchClose(symbol, side string, amount float64, traceID, rea
 	if tradeID == "" {
 		tradeID = t.tradeIDForSymbol(symbol)
 	}
+	pos := t.state.Positions[strings.ToUpper(symbol)]
+	remain := 0.0
+	initAmt := 0.0
+	entry := 0.0
+	if pos != nil {
+		remain = pos.Amount
+		initAmt = pos.InitialAmount
+		entry = pos.EntryPrice
+	}
+	logger.Infof("Close request -> symbol=%s side=%s trade=%s amount=%.6f remain=%.6f initial=%.6f entry=%.4f reason=%s",
+		symbol, side, tradeID, amount, remain, initAmt, entry, reason)
 
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -783,14 +795,11 @@ func (t *Trader) planEventAmount(p PlanEventPayload, pos *exchange.Position) flo
 	switch p.EventType {
 	case exit.PlanEventTypeTierHit:
 		if ratio, ok := extractFloat(p.Context, "ratio"); ok && ratio > 0 {
-			if ratio > 1 {
-				ratio = 1
-			}
 			return trading.CalcCloseAmount(pos.Amount, pos.InitialAmount, ratio, true)
 		}
-		return pos.Amount
+		return trading.CalcCloseAmount(pos.Amount, pos.InitialAmount, 1, false)
 	default:
-		return pos.Amount
+		return trading.CalcCloseAmount(pos.Amount, pos.InitialAmount, 1, false)
 	}
 }
 

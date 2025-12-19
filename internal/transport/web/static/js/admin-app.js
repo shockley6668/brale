@@ -458,11 +458,37 @@
       .filter(Boolean);
   };
 
+  const roundPrice = (val, precision = 4) => {
+    const num = Number(val);
+    if (!Number.isFinite(num)) return num;
+    return Number(num.toFixed(precision));
+  };
+
+  const prettifyPromptLabel = (prompt) => {
+    const raw = (prompt || '').toString().trim();
+    if (!raw) return '—';
+    const parts = raw
+      .split(/[,\n]/)
+      .map((p) => p.trim())
+      .filter(Boolean);
+    if (!parts.length) return raw;
+    return parts
+      .map((p) => {
+        const [model, preset] = p.split(':').map((s) => s.trim());
+        if (preset) return `${model} · ${preset}`;
+        return model;
+      })
+      .join(' / ');
+  };
+
   const decorateStrategyCard = (symbol, detail = {}) => {
     const mws = detail.middlewares || detail.Middlewares || [];
     const strategies = detail.strategies || detail.Strategies || [];
-    const sysPrompt = detail.system_prompt || detail.systemPrompt || detail.SystemPrompt || '';
-    const userPrompt = detail.user_prompt || detail.userPrompt || detail.UserPrompt || '';
+    const sysPrompt = prettifyPromptLabel(
+      detail.system_prompt || detail.systemPrompt || detail.SystemPrompt || '',
+    );
+    const userPrompt =
+      detail.user_prompt || detail.userPrompt || detail.UserPrompt || '';
     const profileLabel =
       detail.profile || detail.Profile || detail.profile_name || detail.ProfileName || '';
     const exitSummary = detail.exit_summary || detail.ExitSummary || '';
@@ -594,6 +620,8 @@
         sl_tier3_ratio: 0.34,
         reason: '',
         price: { last: 0, high: 0, low: 0 },
+        tp_pct: 0.02,
+        sl_pct: 0.01,
         loadingPrice: false,
         submitting: false,
         showConfirm: false,
@@ -1065,6 +1093,7 @@
           desk.decisions = (decRes.logs || []).map((log) => normalizeDecisionCard(log, traceMap[log.trace_id]));
           desk.latestDecisions = pickLatestDeskDecisions(desk.decisions);
           desk.positions = posRes.positions || [];
+          await refreshDeskPositionsPnL({ silent: true });
         } catch (e) {
           desk.error = e.message;
           showToast(e.message, 'error');
@@ -1244,7 +1273,7 @@
           loadDecisions();
           loadProviderOutputs();
         }
-        if (next === 'positions') loadPositions();
+        if (next === 'positions') loadPositions().then(() => refreshPositionsPagePnL({ silent: true }));
         if (next === 'manualOpen') {
           ensureManualSymbol();
           if (manualOpen.symbol) loadManualPrice();
@@ -1256,8 +1285,9 @@
 
       const refreshCurrent = () => switchView(view.value);
 
-      const refreshPositionsPagePnL = async () => {
+      const refreshPositionsPagePnL = async (opts = {}) => {
         if (positions.refreshing || positions.loading) return;
+        const silent = opts && opts.silent === true;
         const ids = (positions.items || [])
           .map((p) => Number(p.trade_id))
           .filter((id) => Number.isFinite(id) && id > 0);
@@ -1281,10 +1311,37 @@
             }
           });
           await Promise.all(workers);
-          showToast('已刷新当前页盈亏');
+          if (!silent) showToast('已刷新当前页盈亏');
         } finally {
           positions.refreshing = false;
         }
+      };
+
+      const refreshDeskPositionsPnL = async (opts = {}) => {
+        const silent = opts && opts.silent === true;
+        const list = desk.positions || [];
+        const ids = list
+          .map((p) => Number(p.trade_id))
+          .filter((id) => Number.isFinite(id) && id > 0);
+        if (!ids.length) return;
+        const queue = ids.slice();
+        const workerCount = Math.min(3, queue.length);
+        const workers = Array.from({ length: workerCount }, async () => {
+          while (queue.length) {
+            const id = queue.shift();
+            try {
+              const res = await fetchJSON(`/api/live/freqtrade/positions/${id}/refresh`, { method: 'POST' });
+              const next = res?.position || null;
+              if (!next) continue;
+              const idx = desk.positions.findIndex((p) => Number(p.trade_id) === id);
+              if (idx >= 0) {
+                desk.positions[idx] = { ...desk.positions[idx], ...next };
+              }
+            } catch (e) { }
+          }
+        });
+        await Promise.all(workers);
+        if (!silent) showToast('已刷新 Desk 盈亏');
       };
 
       const changeDecisionPage = async (delta) => {
@@ -1468,6 +1525,7 @@
           positions.items = openRes.positions || [];
           positions.total = openRes.total_count || 0;
           positions.closed = closedRes.positions || [];
+          await refreshPositionsPagePnL({ silent: true });
         } catch (e) {
           positions.error = e.message;
           showToast(e.message, 'error');
@@ -1658,7 +1716,7 @@
           const comp = (inst.planComponent || '').trim();
           if (!comp || comp.indexOf('.tier') === -1) return;
           const state = inst.parsedState || {};
-          const target = Number(state.target_price);
+          const target = roundPrice(state.target_price);
           const ratio = Number(state.ratio);
           if (!Number.isFinite(target) || !Number.isFinite(ratio)) return;
           tierEdits[comp] = { target_price: target, ratio };
@@ -1700,7 +1758,7 @@
           if (!comp || comp.indexOf('.tier') === -1) return;
           const alias = comp.split('.')[0] || '';
           const state = inst.parsedState || {};
-          const targetPrice = Number(state.target_price);
+          const targetPrice = roundPrice(state.target_price);
           const ratio = Number(state.ratio);
           if (!Number.isFinite(targetPrice) || !Number.isFinite(ratio)) return;
           const rawStatus = (state.status || inst.status || '').toString().trim().toLowerCase();
@@ -1784,7 +1842,7 @@
           group.tiers.forEach((tier) => {
             const edit = tierEdits[tier.component];
             if (!edit) return;
-            const nextTarget = Number(edit.target_price);
+            const nextTarget = roundPrice(edit.target_price);
             const nextRatio = Number(edit.ratio);
             const changedTarget = Number.isFinite(nextTarget) && Math.abs(nextTarget - tier.target_price) > 1e-9;
             const changedRatio = Number.isFinite(nextRatio) && Math.abs(nextRatio - tier.ratio) > 1e-9;
@@ -1906,7 +1964,7 @@
             if (!tier.editable) return;
             const edit = tierEdits[tier.component];
             if (!edit) return;
-            const nextTarget = Number(edit.target_price);
+            const nextTarget = roundPrice(edit.target_price);
             const nextRatio = Number(edit.ratio);
             const params = {};
             if (Number.isFinite(nextTarget) && Math.abs(nextTarget - tier.target_price) > 1e-9) {
@@ -2103,6 +2161,7 @@
           if ((!manualOpen.entry_price || Number(manualOpen.entry_price) <= 0) && res.last > 0) {
             manualOpen.entry_price = res.last;
           }
+          return res;
         } catch (e) {
           showToast(e.message, 'error');
         } finally {
@@ -2149,16 +2208,37 @@
         return parts.length ? parts.join(' · ') : '--';
       };
 
-      const priceToRelativePct = (price, entry, side) => {
-        const p = Number(price);
-        const base = Number(entry);
-        if (!p || !base || base <= 0) return null;
-        const dir = (side || '').toLowerCase();
-        if (dir === 'short') {
-          return 1 - p / base;
-        }
-        return p / base - 1;
-      };
+  const priceToRelativePct = (price, entry, side) => {
+    const p = Number(price);
+    const base = Number(entry);
+    if (!p || !base || base <= 0) return null;
+    const dir = (side || '').toLowerCase();
+    if (dir === 'short') {
+      return 1 - p / base;
+    }
+    return p / base - 1;
+  };
+
+  const PRICE_PADDING_RATIO = 0.005;
+
+  const calcPaddedRange = (prices) => {
+    const valid = (prices || [])
+      .map((p) => Number(p))
+      .filter((p) => Number.isFinite(p) && p > 0);
+    if (!valid.length) return null;
+    const minPrice = Math.min(...valid);
+    const maxPrice = Math.max(...valid);
+    const span = maxPrice - minPrice;
+    const padding = span > 0 ? span * PRICE_PADDING_RATIO : Math.max(minPrice * PRICE_PADDING_RATIO, 1);
+    const paddedMin = Math.max(0, minPrice - padding);
+    const paddedMax = maxPrice + padding;
+    return { min: paddedMin, max: paddedMax, range: paddedMax - paddedMin };
+  };
+
+  const positionWithinRange = (price, bounds) => {
+    if (!bounds || !Number.isFinite(Number(price)) || bounds.range <= 0) return 50;
+    return ((Number(price) - bounds.min) / bounds.range) * 100;
+  };
 
       // Exit Levels parsing for visualization
       const exitLevels = computed(() => {
@@ -2286,13 +2366,11 @@
 
         // Calculate position percentage for each level
         if (levels.length === 0) return [];
-        const minPrice = Math.min(...allPrices) * 0.98; // Add 2% padding
-        const maxPrice = Math.max(...allPrices) * 1.02;
-        const range = maxPrice - minPrice;
-        if (range <= 0) return levels;
+        const bounds = calcPaddedRange(allPrices);
+        if (!bounds || bounds.range <= 0) return levels;
 
         levels.forEach((lv) => {
-          lv.position = ((lv.price - minPrice) / range) * 100;
+          lv.position = positionWithinRange(lv.price, bounds);
         });
 
         return levels;
@@ -2359,11 +2437,9 @@
           .flatMap((l) => [l.price, l.hitPrice])
           .filter((p) => Number(p) > 0)
           .concat([entry, Number(data.current_price) || entry]);
-        const minPrice = Math.min(...allPrices) * 0.98;
-        const maxPrice = Math.max(...allPrices) * 1.02;
-        const range = maxPrice - minPrice;
-        if (range <= 0) return 50;
-        return ((entry - minPrice) / range) * 100;
+        const bounds = calcPaddedRange(allPrices);
+        if (!bounds || bounds.range <= 0) return 50;
+        return positionWithinRange(entry, bounds);
       });
 
       const currentPricePosition = computed(() => {
@@ -2376,11 +2452,9 @@
           .flatMap((l) => [l.price, l.hitPrice])
           .filter((p) => Number(p) > 0)
           .concat([entry, current]);
-        const minPrice = Math.min(...allPrices) * 0.98;
-        const maxPrice = Math.max(...allPrices) * 1.02;
-        const range = maxPrice - minPrice;
-        if (range <= 0) return 50;
-        return ((current - minPrice) / range) * 100;
+        const bounds = calcPaddedRange(allPrices);
+        if (!bounds || bounds.range <= 0) return 50;
+        return positionWithinRange(current, bounds);
       });
 
       // TradingView Widget loader
@@ -2393,7 +2467,19 @@
         // Convert symbol format: BTC/USDT -> BINANCE:BTCUSDT
         // Handle Freqtrade futures format: BTC/USDT:USDT -> BINANCE:BTCUSDT
         const rawSymbol = symbol.split(':')[0];
-        const tvSymbol = 'BINANCE:' + rawSymbol.replace(/[/]/g, '').toUpperCase();
+        const normalized = rawSymbol.replace(/[/]/g, '').toUpperCase();
+        const parts = rawSymbol.split('/');
+        const base = parts[0] ? parts[0].toUpperCase() : normalized.replace(/USDT$/, '');
+        const quote = parts[1] ? parts[1].toUpperCase() : '';
+        // Prefer perpetual futures feed when available; fallback to spot
+        let tvSymbol = 'BINANCE:' + normalized;
+        if (normalized.includes('PERP')) {
+          tvSymbol = 'BINANCE:' + normalized;
+        } else if (quote.includes('USDT')) {
+          tvSymbol = `BINANCE:${base}USDTPERP`;
+        } else if (normalized.endsWith('USDT')) {
+          tvSymbol = `BINANCE:${base}USDTPERP`;
+        }
         container.innerHTML = '';
         const script = document.createElement('script');
         script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
@@ -2584,8 +2670,32 @@
       const fillEntryPriceFromLast = () => {
         if (manualOpen.price && manualOpen.price.last > 0) {
           manualOpen.entry_price = manualOpen.price.last;
+          applyPctTargets();
         } else {
           showToast('暂无最新价，请先刷新价格', 'error');
+        }
+      };
+
+      const fetchAndFillEntryPrice = async () => {
+        const res = await loadManualPrice();
+        if (res && res.last > 0) {
+          manualOpen.entry_price = res.last;
+          applyPctTargets();
+        }
+      };
+
+      const applyPctTargets = () => {
+        const base = Number(manualOpen.entry_price) || Number(manualOpen.price?.last) || 0;
+        if (!Number.isFinite(base) || base <= 0) return;
+        const side = (manualOpen.side || '').toLowerCase();
+        const tpPct = Number(manualOpen.tp_pct) || 0;
+        const slPct = Number(manualOpen.sl_pct) || 0;
+        const dir = side === 'short' ? -1 : 1;
+        if (manualOpenFlags.value.hasTpSingle) {
+          manualOpen.take_profit = base * (1 + dir * tpPct);
+        }
+        if (manualOpenFlags.value.hasSlSingle) {
+          manualOpen.stop_loss = base * (1 - dir * slPct);
         }
       };
 
@@ -2716,7 +2826,9 @@
         forceClosePosition,
         refreshPositionPnL,
         loadManualPrice,
+        fetchAndFillEntryPrice,
         fillEntryPriceFromLast,
+        applyPctTargets,
         submitManualOpen,
         openManualConfirm,
         confirmManualOpen,
