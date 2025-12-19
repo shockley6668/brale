@@ -21,6 +21,12 @@
     return val.toFixed(6);
   };
 
+  const formatPrice2 = (val) => {
+    const num = Number(val);
+    if (!Number.isFinite(num)) return '--';
+    return num.toFixed(2);
+  };
+
   const formatUSD = (val) => {
     if (val === null || val === undefined || Number.isNaN(val)) return '--';
     const prefix = val > 0 ? '+' : '';
@@ -2602,7 +2608,7 @@
         }
       };
 
-      const submitManualOpen = async () => {
+	      const submitManualOpen = async () => {
         const symbol = (manualOpen.symbol || '').trim().toUpperCase();
         if (!symbol) {
           showToast('请选择交易对', 'error');
@@ -2613,31 +2619,32 @@
           showToast(preview.errors[0], 'error');
           return;
         }
-        manualOpen.submitting = true;
-        try {
-          const payload = {
-            symbol,
-            side: manualOpen.side,
-            leverage: Number(manualOpen.leverage) || 0,
-            position_size_usd: Number(manualOpen.position_size_usd) || 0,
-            entry_price: Number(manualOpen.entry_price) || 0,
-            stop_loss: Number(manualOpen.stop_loss) || 0,
-            take_profit: Number(manualOpen.take_profit) || 0,
-            exit_combo: manualOpen.exit_combo || '',
-            tier1_target: Number(manualOpen.tier1_target) || 0,
-            tier1_ratio: Number(manualOpen.tier1_ratio) || 0,
-            tier2_target: Number(manualOpen.tier2_target) || 0,
-            tier2_ratio: Number(manualOpen.tier2_ratio) || 0,
-            tier3_target: Number(manualOpen.tier3_target) || 0,
-            tier3_ratio: Number(manualOpen.tier3_ratio) || 0,
-            sl_tier1_target: Number(manualOpen.sl_tier1_target) || 0,
-            sl_tier1_ratio: Number(manualOpen.sl_tier1_ratio) || 0,
-            sl_tier2_target: Number(manualOpen.sl_tier2_target) || 0,
-            sl_tier2_ratio: Number(manualOpen.sl_tier2_ratio) || 0,
-            sl_tier3_target: Number(manualOpen.sl_tier3_target) || 0,
-            sl_tier3_ratio: Number(manualOpen.sl_tier3_ratio) || 0,
-            reason: manualOpen.reason || '手动信号',
-          };
+	        manualOpen.submitting = true;
+	        try {
+	          const roundManual = (val) => roundPrice(Number(val) || 0, MANUAL_PRICE_PRECISION);
+	          const payload = {
+	            symbol,
+	            side: manualOpen.side,
+	            leverage: Number(manualOpen.leverage) || 0,
+	            position_size_usd: Number(manualOpen.position_size_usd) || 0,
+	            entry_price: roundManual(manualOpen.entry_price),
+	            stop_loss: roundManual(manualOpen.stop_loss),
+	            take_profit: roundManual(manualOpen.take_profit),
+	            exit_combo: manualOpen.exit_combo || '',
+	            tier1_target: roundManual(manualOpen.tier1_target),
+	            tier1_ratio: Number(manualOpen.tier1_ratio) || 0,
+	            tier2_target: roundManual(manualOpen.tier2_target),
+	            tier2_ratio: Number(manualOpen.tier2_ratio) || 0,
+	            tier3_target: roundManual(manualOpen.tier3_target),
+	            tier3_ratio: Number(manualOpen.tier3_ratio) || 0,
+	            sl_tier1_target: roundManual(manualOpen.sl_tier1_target),
+	            sl_tier1_ratio: Number(manualOpen.sl_tier1_ratio) || 0,
+	            sl_tier2_target: roundManual(manualOpen.sl_tier2_target),
+	            sl_tier2_ratio: Number(manualOpen.sl_tier2_ratio) || 0,
+	            sl_tier3_target: roundManual(manualOpen.sl_tier3_target),
+	            sl_tier3_ratio: Number(manualOpen.sl_tier3_ratio) || 0,
+	            reason: manualOpen.reason || '手动信号',
+	          };
           await fetchJSON('/api/live/freqtrade/manual-open', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -2669,7 +2676,7 @@
 
       const fillEntryPriceFromLast = () => {
         if (manualOpen.price && manualOpen.price.last > 0) {
-          manualOpen.entry_price = manualOpen.price.last;
+          manualOpen.entry_price = roundPrice(manualOpen.price.last, 2);
           applyPctTargets();
         } else {
           showToast('暂无最新价，请先刷新价格', 'error');
@@ -2679,23 +2686,60 @@
       const fetchAndFillEntryPrice = async () => {
         const res = await loadManualPrice();
         if (res && res.last > 0) {
-          manualOpen.entry_price = res.last;
+          manualOpen.entry_price = roundPrice(res.last, 2);
           applyPctTargets();
         }
       };
 
-      const applyPctTargets = () => {
-        const base = Number(manualOpen.entry_price) || Number(manualOpen.price?.last) || 0;
+      const MANUAL_PRICE_PRECISION = 2;
+      const MANUAL_PCT_MAX = 0.1;
+
+      const manualBasePrice = () => Number(manualOpen.entry_price) || Number(manualOpen.price?.last) || 0;
+      const manualDir = () => ((manualOpen.side || '').toLowerCase() === 'short' ? -1 : 1);
+      const clampManualPct = (pct) => Math.min(MANUAL_PCT_MAX, Math.max(0, Number(pct) || 0));
+
+      const normalizeManualPriceField = (field) => {
+        if (!field) return;
+        const val = manualOpen[field];
+        if (val === '' || val === null || val === undefined) return;
+        const num = Number(val);
+        if (!Number.isFinite(num)) return;
+        manualOpen[field] = roundPrice(num, MANUAL_PRICE_PRECISION);
+      };
+
+      const manualTierPct = (kind, field) => {
+        const base = manualBasePrice();
+        if (!Number.isFinite(base) || base <= 0) return 0;
+        const target = Number(manualOpen[field]);
+        if (!Number.isFinite(target) || target <= 0) return 0;
+        const dir = manualDir();
+        const rel = target / base - 1;
+        const pct = kind === 'sl' ? -dir * rel : dir * rel;
+        return clampManualPct(pct);
+      };
+
+      const applyTierPctTarget = (kind, field, pct) => {
+        const base = manualBasePrice();
         if (!Number.isFinite(base) || base <= 0) return;
-        const side = (manualOpen.side || '').toLowerCase();
-        const tpPct = Number(manualOpen.tp_pct) || 0;
-        const slPct = Number(manualOpen.sl_pct) || 0;
-        const dir = side === 'short' ? -1 : 1;
+        const dir = manualDir();
+        const p = clampManualPct(pct);
+        const next = kind === 'sl' ? base * (1 - dir * p) : base * (1 + dir * p);
+        manualOpen[field] = roundPrice(next, MANUAL_PRICE_PRECISION);
+      };
+
+      const applyPctTargets = () => {
+        const base = manualBasePrice();
+        if (!Number.isFinite(base) || base <= 0) return;
+        const tpPct = clampManualPct(manualOpen.tp_pct);
+        const slPct = clampManualPct(manualOpen.sl_pct);
+        const dir = manualDir();
         if (manualOpenFlags.value.hasTpSingle) {
-          manualOpen.take_profit = base * (1 + dir * tpPct);
+          manualOpen.take_profit = roundPrice(base * (1 + dir * tpPct), MANUAL_PRICE_PRECISION);
+          normalizeManualPriceField('take_profit');
         }
         if (manualOpenFlags.value.hasSlSingle) {
-          manualOpen.stop_loss = base * (1 - dir * slPct);
+          manualOpen.stop_loss = roundPrice(base * (1 - dir * slPct), MANUAL_PRICE_PRECISION);
+          normalizeManualPriceField('stop_loss');
         }
       };
 
@@ -2812,11 +2856,12 @@
         loadPositions,
         badgeClass,
         formatTime,
-        formatDate,
-        formatDateTime,
-        formatNumber,
-        formatUSD,
-        formatPercent,
+	        formatDate,
+	        formatDateTime,
+	        formatNumber,
+	        formatPrice2,
+	        formatUSD,
+	        formatPercent,
         stopLossDistancePct,
         nearestTriggerDistancePct,
         statusLabel,
@@ -2828,6 +2873,9 @@
         loadManualPrice,
         fetchAndFillEntryPrice,
         fillEntryPriceFromLast,
+        normalizeManualPriceField,
+        manualTierPct,
+        applyTierPctTarget,
         applyPctTargets,
         submitManualOpen,
         openManualConfirm,

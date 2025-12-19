@@ -12,6 +12,23 @@ import (
 	"brale/internal/trader"
 )
 
+func buildSignalEntryPayload(d decision.Decision, side string, entryPrice float64) trader.SignalEntryPayload {
+	sp := trader.SignalEntryPayload{
+		Order: exchange.OpenRequest{
+			Symbol: d.Symbol,
+			Side:   side,
+
+			OrderType: "limit",
+			Price:     entryPrice,
+			Amount:    d.PositionSizeUSD,
+		},
+	}
+	if d.Leverage > 0 {
+		sp.Order.Leverage = float64(d.Leverage)
+	}
+	return sp
+}
+
 func (m *Manager) Execute(ctx context.Context, input decision.DecisionInput) error {
 	if m.trader == nil {
 		return fmt.Errorf("trader actor not initialized")
@@ -46,16 +63,7 @@ func (m *Manager) Execute(ctx context.Context, input decision.DecisionInput) err
 		if err := m.validateInitialStopDistance(d, side, entryPrice); err != nil {
 			return err
 		}
-		sp := trader.SignalEntryPayload{
-			Order: exchange.OpenRequest{
-				Symbol: d.Symbol,
-				Side:   side,
-
-				OrderType: "limit",
-				Price:     entryPrice,
-				Amount:    0,
-			},
-		}
+		sp := buildSignalEntryPayload(d, side, entryPrice)
 		if p, err := json.Marshal(sp); err == nil {
 			payload = p
 		}

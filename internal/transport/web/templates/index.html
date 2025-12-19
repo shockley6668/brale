@@ -663,89 +663,125 @@
 	                                <span>杠杆</span>
 	                                <input class="input" type="number" min="1" step="1" v-model.number="manualOpen.leverage">
 	                            </label>
-                            <label class="form-row col-span-4">
-                                <span>开仓价格</span>
-                                <div class="flex gap-2 items-center">
-                                    <input class="input" type="number" min="0" step="0.0001" v-model.number="manualOpen.entry_price">
-                                    <button class="pill-btn" @click="fetchAndFillEntryPrice" :disabled="manualOpen.loadingPrice || !manualOpen.symbol">获取当前价</button>
-                                </div>
-                                <div class="mt-2 flex items-center gap-4">
-                                    <div class="flex-1">
-                                        <div class="flex justify-between text-xs muted mb-1">
-                                            <span>止盈偏移 [[ formatPercent(manualOpen.tp_pct) ]]</span>
-                                            <span>止损偏移 [[ formatPercent(manualOpen.sl_pct) ]]</span>
-                                        </div>
-                                        <div class="flex items-center gap-2">
-                                            <input class="input range" type="range" min="0" max="0.1" step="0.001" v-model.number="manualOpen.tp_pct" @input="applyPctTargets">
-                                            <input class="input range" type="range" min="0" max="0.1" step="0.001" v-model.number="manualOpen.sl_pct" @input="applyPctTargets">
-                                        </div>
-                                        <p class="muted text-xs mt-1">拖动可快速填充单段止盈/止损价格，也可手动输入。</p>
-                                    </div>
-                                </div>
-                            </label>
+		                            <label class="form-row col-span-4">
+		                                <span>开仓价格</span>
+		                                <div class="flex gap-2 items-center">
+		                                    <input class="input" type="number" min="0" step="0.01" v-model.number="manualOpen.entry_price" @blur="normalizeManualPriceField('entry_price')">
+		                                    <button class="pill-btn" @click="fetchAndFillEntryPrice" :disabled="manualOpen.loadingPrice || !manualOpen.symbol">获取当前价</button>
+		                                </div>
+		                                <div class="mt-2 flex items-center gap-4" v-if="manualOpenFlags.hasTpSingle || manualOpenFlags.hasSlSingle">
+		                                    <div class="flex-1">
+		                                        <div class="flex justify-between text-xs muted mb-1">
+		                                            <span v-if="manualOpenFlags.hasTpSingle">止盈偏移 [[ formatPercent(manualOpen.tp_pct) ]]</span>
+		                                            <span v-if="manualOpenFlags.hasSlSingle">止损偏移 [[ formatPercent(manualOpen.sl_pct) ]]</span>
+		                                        </div>
+		                                        <div class="flex items-center gap-2">
+		                                            <input v-if="manualOpenFlags.hasTpSingle" class="input range" type="range" min="0" max="0.1" step="0.001" v-model.number="manualOpen.tp_pct" @input="applyPctTargets">
+		                                            <input v-if="manualOpenFlags.hasSlSingle" class="input range" type="range" min="0" max="0.1" step="0.001" v-model.number="manualOpen.sl_pct" @input="applyPctTargets">
+		                                        </div>
+		                                        <p class="muted text-xs mt-1">拖动可快速填充单段止盈/止损价格，也可手动输入。</p>
+		                                    </div>
+		                                </div>
+		                            </label>
 
 	                            <label class="form-row col-span-4">
 	                                <span>仓位（USD）</span>
 	                                <input class="input" type="number" min="1" step="10" v-model.number="manualOpen.position_size_usd">
 	                            </label>
-	                            <label class="form-row col-span-4" v-if="manualOpenFlags.hasSlSingle">
-	                                <span>止损目标价</span>
-	                                <input class="input" type="number" step="0.0001" v-model.number="manualOpen.stop_loss">
-	                            </label>
-	                            <label class="form-row col-span-4" v-if="manualOpenFlags.hasTpSingle">
-	                                <span>止盈目标价</span>
-	                                <input class="input" type="number" step="0.0001" v-model.number="manualOpen.take_profit">
-	                            </label>
+		                            <label class="form-row col-span-4" v-if="manualOpenFlags.hasSlSingle">
+		                                <span>止损目标价</span>
+		                                <input class="input" type="number" step="0.01" v-model.number="manualOpen.stop_loss" @blur="normalizeManualPriceField('stop_loss')">
+		                            </label>
+		                            <label class="form-row col-span-4" v-if="manualOpenFlags.hasTpSingle">
+		                                <span>止盈目标价</span>
+		                                <input class="input" type="number" step="0.01" v-model.number="manualOpen.take_profit" @blur="normalizeManualPriceField('take_profit')">
+		                            </label>
 
-	                            <label class="form-row col-span-4" v-if="manualOpenFlags.hasTpTiers">
-	                                <span>Tier1 目标</span>
-	                                <input class="input" type="number" step="0.0001" v-model.number="manualOpen.tier1_target">
-	                            </label>
+		                            <label class="form-row col-span-4" v-if="manualOpenFlags.hasTpTiers">
+		                                <div class="flex justify-between">
+		                                    <span>Tier1 目标</span>
+		                                    <span class="muted text-xs">偏移 [[ formatPercent(manualTierPct('tp','tier1_target')) ]]</span>
+		                                </div>
+		                                <input class="input" type="number" step="0.01" v-model.number="manualOpen.tier1_target" @blur="normalizeManualPriceField('tier1_target')">
+		                                <input class="input range mt-1" type="range" min="0" max="0.1" step="0.001"
+		                                       :value="manualTierPct('tp','tier1_target')"
+		                                       @input="applyTierPctTarget('tp','tier1_target',$event.target.valueAsNumber)">
+		                            </label>
 	                            <label class="form-row col-span-4" v-if="manualOpenFlags.hasTpTiers">
 	                                <span>Tier1 比例 (0-1)</span>
 	                                <input class="input" type="number" min="0" max="1" step="0.01" v-model.number="manualOpen.tier1_ratio">
 	                            </label>
 
-	                            <label class="form-row col-span-4" v-if="manualOpenFlags.hasTpTiers">
-	                                <span>Tier2 目标</span>
-	                                <input class="input" type="number" step="0.0001" v-model.number="manualOpen.tier2_target">
-	                            </label>
+		                            <label class="form-row col-span-4" v-if="manualOpenFlags.hasTpTiers">
+		                                <div class="flex justify-between">
+		                                    <span>Tier2 目标</span>
+		                                    <span class="muted text-xs">偏移 [[ formatPercent(manualTierPct('tp','tier2_target')) ]]</span>
+		                                </div>
+		                                <input class="input" type="number" step="0.01" v-model.number="manualOpen.tier2_target" @blur="normalizeManualPriceField('tier2_target')">
+		                                <input class="input range mt-1" type="range" min="0" max="0.1" step="0.001"
+		                                       :value="manualTierPct('tp','tier2_target')"
+		                                       @input="applyTierPctTarget('tp','tier2_target',$event.target.valueAsNumber)">
+		                            </label>
 	                            <label class="form-row col-span-4" v-if="manualOpenFlags.hasTpTiers">
 	                                <span>Tier2 比例 (0-1)</span>
 	                                <input class="input" type="number" min="0" max="1" step="0.01" v-model.number="manualOpen.tier2_ratio">
 	                            </label>
 
-	                            <label class="form-row col-span-4" v-if="manualOpenFlags.hasTpTiers">
-	                                <span>Tier3 目标</span>
-	                                <input class="input" type="number" step="0.0001" v-model.number="manualOpen.tier3_target">
-	                            </label>
+		                            <label class="form-row col-span-4" v-if="manualOpenFlags.hasTpTiers">
+		                                <div class="flex justify-between">
+		                                    <span>Tier3 目标</span>
+		                                    <span class="muted text-xs">偏移 [[ formatPercent(manualTierPct('tp','tier3_target')) ]]</span>
+		                                </div>
+		                                <input class="input" type="number" step="0.01" v-model.number="manualOpen.tier3_target" @blur="normalizeManualPriceField('tier3_target')">
+		                                <input class="input range mt-1" type="range" min="0" max="0.1" step="0.001"
+		                                       :value="manualTierPct('tp','tier3_target')"
+		                                       @input="applyTierPctTarget('tp','tier3_target',$event.target.valueAsNumber)">
+		                            </label>
 	                            <label class="form-row col-span-4" v-if="manualOpenFlags.hasTpTiers">
 	                                <span>Tier3 比例 (0-1)</span>
 	                                <input class="input" type="number" min="0" max="1" step="0.01" v-model.number="manualOpen.tier3_ratio">
 	                            </label>
 
-	                            <label class="form-row col-span-4" v-if="manualOpenFlags.hasSlTiers">
-	                                <span>SL1 目标</span>
-	                                <input class="input" type="number" step="0.0001" v-model.number="manualOpen.sl_tier1_target">
-	                            </label>
+		                            <label class="form-row col-span-4" v-if="manualOpenFlags.hasSlTiers">
+		                                <div class="flex justify-between">
+		                                    <span>SL1 目标</span>
+		                                    <span class="muted text-xs">偏移 [[ formatPercent(manualTierPct('sl','sl_tier1_target')) ]]</span>
+		                                </div>
+		                                <input class="input" type="number" step="0.01" v-model.number="manualOpen.sl_tier1_target" @blur="normalizeManualPriceField('sl_tier1_target')">
+		                                <input class="input range mt-1" type="range" min="0" max="0.1" step="0.001"
+		                                       :value="manualTierPct('sl','sl_tier1_target')"
+		                                       @input="applyTierPctTarget('sl','sl_tier1_target',$event.target.valueAsNumber)">
+		                            </label>
 	                            <label class="form-row col-span-4" v-if="manualOpenFlags.hasSlTiers">
 	                                <span>SL1 比例 (0-1)</span>
 	                                <input class="input" type="number" min="0" max="1" step="0.01" v-model.number="manualOpen.sl_tier1_ratio">
 	                            </label>
 
-	                            <label class="form-row col-span-4" v-if="manualOpenFlags.hasSlTiers">
-	                                <span>SL2 目标</span>
-	                                <input class="input" type="number" step="0.0001" v-model.number="manualOpen.sl_tier2_target">
-	                            </label>
+		                            <label class="form-row col-span-4" v-if="manualOpenFlags.hasSlTiers">
+		                                <div class="flex justify-between">
+		                                    <span>SL2 目标</span>
+		                                    <span class="muted text-xs">偏移 [[ formatPercent(manualTierPct('sl','sl_tier2_target')) ]]</span>
+		                                </div>
+		                                <input class="input" type="number" step="0.01" v-model.number="manualOpen.sl_tier2_target" @blur="normalizeManualPriceField('sl_tier2_target')">
+		                                <input class="input range mt-1" type="range" min="0" max="0.1" step="0.001"
+		                                       :value="manualTierPct('sl','sl_tier2_target')"
+		                                       @input="applyTierPctTarget('sl','sl_tier2_target',$event.target.valueAsNumber)">
+		                            </label>
 	                            <label class="form-row col-span-4" v-if="manualOpenFlags.hasSlTiers">
 	                                <span>SL2 比例 (0-1)</span>
 	                                <input class="input" type="number" min="0" max="1" step="0.01" v-model.number="manualOpen.sl_tier2_ratio">
 	                            </label>
 
-	                            <label class="form-row col-span-4" v-if="manualOpenFlags.hasSlTiers">
-	                                <span>SL3 目标</span>
-	                                <input class="input" type="number" step="0.0001" v-model.number="manualOpen.sl_tier3_target">
-	                            </label>
+		                            <label class="form-row col-span-4" v-if="manualOpenFlags.hasSlTiers">
+		                                <div class="flex justify-between">
+		                                    <span>SL3 目标</span>
+		                                    <span class="muted text-xs">偏移 [[ formatPercent(manualTierPct('sl','sl_tier3_target')) ]]</span>
+		                                </div>
+		                                <input class="input" type="number" step="0.01" v-model.number="manualOpen.sl_tier3_target" @blur="normalizeManualPriceField('sl_tier3_target')">
+		                                <input class="input range mt-1" type="range" min="0" max="0.1" step="0.001"
+		                                       :value="manualTierPct('sl','sl_tier3_target')"
+		                                       @input="applyTierPctTarget('sl','sl_tier3_target',$event.target.valueAsNumber)">
+		                            </label>
 	                            <label class="form-row col-span-4" v-if="manualOpenFlags.hasSlTiers">
 	                                <span>SL3 比例 (0-1)</span>
 	                                <input class="input" type="number" min="0" max="1" step="0.01" v-model.number="manualOpen.sl_tier3_ratio">
@@ -765,10 +801,10 @@
 	                        <div class="callout mt-4" v-if="manualOpenPreview && manualOpenPreview.lines && manualOpenPreview.lines.length">
 	                            <strong>触发价格预览：</strong>
 	                            <div class="mt-2">
-	                                <div class="flex justify-between" v-for="l in manualOpenPreview.lines" :key="l.kind+'-'+l.label">
-	                                    <span>[[ l.label ]] · [[ l.kind ]] · ratio [[ formatPercent(l.ratio) ]]</span>
-	                                    <span>[[ formatNumber(l.price) ]] <span class="muted text-xs" v-if="l.pct !== null && l.pct !== undefined">([[ formatPercent(l.pct) ]])</span></span>
-	                                </div>
+		                                <div class="flex justify-between" v-for="l in manualOpenPreview.lines" :key="l.kind+'-'+l.label">
+		                                    <span>[[ l.label ]] · [[ l.kind ]] · ratio [[ formatPercent(l.ratio) ]]</span>
+		                                    <span>[[ formatPrice2(l.price) ]] <span class="muted text-xs" v-if="l.pct !== null && l.pct !== undefined">([[ formatPercent(l.pct) ]])</span></span>
+		                                </div>
 	                            </div>
 	                        </div>
 	                        <div class="callout error mt-4" v-if="manualOpenPreview && manualOpenPreview.errors && manualOpenPreview.errors.length">
@@ -1080,7 +1116,7 @@
 	                        <div class="muted text-xs mb-2">触发价格明细</div>
 	                        <div class="flex justify-between" v-for="l in manualOpenPreview.lines" :key="'confirm-'+l.kind+'-'+l.label">
 	                            <span>[[ l.label ]] · [[ l.kind ]] · ratio [[ formatPercent(l.ratio) ]]</span>
-	                            <span>[[ formatNumber(l.price) ]] <span class="muted text-xs" v-if="l.pct !== null && l.pct !== undefined">([[ formatPercent(l.pct) ]])</span></span>
+	                            <span>[[ formatPrice2(l.price) ]] <span class="muted text-xs" v-if="l.pct !== null && l.pct !== undefined">([[ formatPercent(l.pct) ]])</span></span>
 	                        </div>
 	                    </div>
 	                    <div class="mt-3" v-if="manualOpen.reason">
