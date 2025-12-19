@@ -13,8 +13,6 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
-// Mocks
-
 type MockPosService struct {
 	mock.Mock
 }
@@ -87,7 +85,6 @@ func TestLiveEngine_RunCycle(t *testing.T) {
 	mockMkt := new(MockMktService)
 	mockDecider := new(MockDecider)
 
-	// Create Engine
 	cfg := &config.Config{}
 	p := EngineParams{
 		Config:     cfg,
@@ -100,13 +97,11 @@ func TestLiveEngine_RunCycle(t *testing.T) {
 	ctx := context.Background()
 	symbols := []string{"BTC/USDT"}
 
-	// 1. Sense
 	mockPos.On("GetAccountSnapshot", ctx).Return(decision.AccountSnapshot{}, nil)
 	mockPos.On("ListPositions", ctx).Return([]decision.PositionSnapshot{}, nil)
 	mockMkt.On("GetAnalysisContexts", ctx, symbols).Return([]decision.AnalysisContext{}, nil)
 	mockMkt.On("CaptureIndicators", mock.Anything).Return()
 
-	// 2. Think
 	decResult := decision.DecisionResult{
 		TraceID: "test-trace",
 		Decisions: []decision.Decision{
@@ -115,11 +110,9 @@ func TestLiveEngine_RunCycle(t *testing.T) {
 	}
 	mockDecider.On("Decide", ctx, mock.Anything).Return(decResult, nil)
 
-	// 3. Act
 	mockMkt.On("LatestPrice", ctx, "BTC/USDT").Return(50000.0)
 	mockPos.On("ExecuteDecision", ctx, "test-trace", mock.AnythingOfType("decision.Decision"), 50000.0).Return(nil)
 
-	// Run
 	err := engine.RunCycle(ctx, symbols)
 	assert.NoError(t, err)
 

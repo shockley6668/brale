@@ -9,7 +9,6 @@ import (
 	"brale/internal/market"
 )
 
-// Settings 描述计算指标所需的最小配置。
 type Settings struct {
 	Symbol   string
 	Interval string
@@ -17,21 +16,18 @@ type Settings struct {
 	RSI      RSISettings
 }
 
-// EMASettings 描述 EMA 指标参数。
 type EMASettings struct {
 	Fast int `json:"fast,omitempty"`
 	Mid  int `json:"mid,omitempty"`
 	Slow int `json:"slow,omitempty"`
 }
 
-// RSISettings 描述 RSI 指标参数。
 type RSISettings struct {
 	Period     int     `json:"period,omitempty"`
 	Oversold   float64 `json:"oversold,omitempty"`
 	Overbought float64 `json:"overbought,omitempty"`
 }
 
-// IndicatorValue 保存单个指标的最新值、序列与状态。
 type IndicatorValue struct {
 	Latest float64   `json:"latest"`
 	Series []float64 `json:"series,omitempty"`
@@ -39,7 +35,6 @@ type IndicatorValue struct {
 	Note   string    `json:"note,omitempty"`
 }
 
-// Report 汇总单个 symbol+interval 的指标输出。
 type Report struct {
 	Symbol   string                    `json:"symbol"`
 	Interval string                    `json:"interval"`
@@ -48,7 +43,6 @@ type Report struct {
 	Warnings []string                  `json:"warnings,omitempty"`
 }
 
-// ComputeAll 计算常用指标并返回结构化报告。
 func ComputeAll(candles []market.Candle, cfg Settings) (Report, error) {
 	rep := Report{
 		Symbol:   cfg.Symbol,
@@ -70,7 +64,6 @@ func ComputeAll(candles []market.Candle, cfg Settings) (Report, error) {
 		volumes[i] = c.Volume
 	}
 
-	// EMA
 	if cfg.EMA.Fast <= 0 {
 		cfg.EMA.Fast = 21
 	}
@@ -103,7 +96,6 @@ func ComputeAll(candles []market.Candle, cfg Settings) (Report, error) {
 		Note:   fmt.Sprintf("EMA%d vs price", cfg.EMA.Slow),
 	}
 
-	// RSI
 	if cfg.RSI.Period <= 0 {
 		cfg.RSI.Period = 14
 	}
@@ -129,7 +121,6 @@ func ComputeAll(candles []market.Candle, cfg Settings) (Report, error) {
 		Note:   fmt.Sprintf("period=%d thresholds=%.1f/%.1f", cfg.RSI.Period, cfg.RSI.Oversold, cfg.RSI.Overbought),
 	}
 
-	// MACD
 	macd, signal, hist := talib.Macd(closes, 12, 26, 9)
 	macdSeries := sanitizeSeries(macd)
 	signalSeries := sanitizeSeries(signal)
@@ -149,7 +140,6 @@ func ComputeAll(candles []market.Candle, cfg Settings) (Report, error) {
 		Note:   macdNote,
 	}
 
-	// ROC
 	rocSeries := sanitizeSeries(talib.Roc(closes, 9))
 	rocVal := lastValid(rocSeries)
 	rep.Values["roc"] = IndicatorValue{
@@ -159,7 +149,6 @@ func ComputeAll(candles []market.Candle, cfg Settings) (Report, error) {
 		Note:   "period=9",
 	}
 
-	// Stochastic Oscillator
 	k, d := talib.Stoch(highs, lows, closes, 14, 3, talib.SMA, 3, talib.SMA)
 	kSeries := sanitizeSeries(k)
 	dSeries := sanitizeSeries(d)
@@ -170,7 +159,6 @@ func ComputeAll(candles []market.Candle, cfg Settings) (Report, error) {
 		Note:   fmt.Sprintf("d=%.2f", lastValid(dSeries)),
 	}
 
-	// Williams %R
 	will := sanitizeSeries(talib.WillR(highs, lows, closes, 14))
 	rep.Values["williams_r"] = IndicatorValue{
 		Latest: lastValid(will),
@@ -179,7 +167,6 @@ func ComputeAll(candles []market.Candle, cfg Settings) (Report, error) {
 		Note:   "period=14",
 	}
 
-	// ATR
 	atrSeries := sanitizeSeries(talib.Atr(highs, lows, closes, 14))
 	rep.Values["atr"] = IndicatorValue{
 		Latest: lastValid(atrSeries),
@@ -188,7 +175,6 @@ func ComputeAll(candles []market.Candle, cfg Settings) (Report, error) {
 		Note:   "period=14",
 	}
 
-	// OBV style volume thrust
 	obv := sanitizeSeries(talib.Obv(closes, volumes))
 	rep.Values["obv"] = IndicatorValue{
 		Latest: lastValid(obv),
@@ -200,7 +186,6 @@ func ComputeAll(candles []market.Candle, cfg Settings) (Report, error) {
 	return rep, nil
 }
 
-// ComputeATRSeries 单独计算 ATR 序列，便于在禁用其它指标时仍可获取波动率数据。
 func ComputeATRSeries(candles []market.Candle, period int) ([]float64, error) {
 	if len(candles) == 0 {
 		return nil, fmt.Errorf("no candles")
@@ -234,7 +219,6 @@ func sanitizeSeries(src []float64) []float64 {
 	return out
 }
 
-// trimEMALeadingZeros drops TALib's zero-seeded EMA values so plots start when enough candles exist.
 func trimEMALeadingZeros(series []float64) []float64 {
 	start := 0
 	for start < len(series) && almostZero(series[start]) {

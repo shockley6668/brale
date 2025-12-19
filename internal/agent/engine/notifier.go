@@ -16,7 +16,6 @@ const (
 	entryFillTimeout = 11 * time.Minute
 )
 
-// Notifier handles external notifications (e.g. Telegram).
 type Notifier interface {
 	SendStructured(msg notifier.StructuredMessage) error
 }
@@ -47,27 +46,35 @@ func (e *LiveEngine) sendMetaSummaryTelegram(res decision.DecisionResult) error 
 		return e.Notifier.SendStructured(msg)
 	}
 
-	// Legacy parsing logic removed as requested.
-	// If we don't have breakdown, we don't send anything.
 	logger.Warnf("Meta breakdown missing or empty, skipping notification.")
 	return nil
 }
 
 func buildMetaBreakdownSections(res decision.DecisionResult, bd *decision.MetaVoteBreakdown) []notifier.MessageSection {
-	sections := make([]notifier.MessageSection, 0, len(bd.Symbols))
+	sections := make([]notifier.MessageSection, 0, 2+len(bd.Symbols))
 
-	// 遍历每个币种，生成独立的 section
+	conclusionLines := make([]string, 0, 2)
+	if line := metaSummaryFirstLine(res.MetaSummary); line != "" {
+		conclusionLines = append(conclusionLines, line)
+	}
+	if final := renderMetaFinalActions(res.Decisions); final != "" {
+		conclusionLines = append(conclusionLines, final)
+	}
+	if len(conclusionLines) > 0 {
+		sections = append(sections, notifier.MessageSection{Title: "结论", Lines: conclusionLines})
+	}
+
 	for _, sym := range bd.Symbols {
 		title := strings.TrimSpace(sym.Symbol)
 		if title == "" {
 			title = "-"
 		}
-		// 添加投票统计：ETH/USDT（hold:2 / open_long:1）
+
 		if votePart := renderMetaVotesInline(sym.Votes); votePart != "" {
 			title = fmt.Sprintf("%s（%s）", title, votePart)
 		}
 		lines := make([]string, 0, len(sym.Providers)+1)
-		// 列出每个 LLM 的动作
+
 		for _, p := range sym.Providers {
 			act := strings.Join(p.Actions, ", ")
 			if strings.TrimSpace(act) == "" {
@@ -77,14 +84,14 @@ func buildMetaBreakdownSections(res decision.DecisionResult, bd *decision.MetaVo
 			if id == "" {
 				id = "-"
 			}
-			// Format: "- provider: action"
+
 			if shouldShowMetaProviderWeight(p.Weight) {
 				lines = append(lines, fmt.Sprintf("- %s[%s]: %s", id, formatMetaWeight(p.Weight), act))
 			} else {
 				lines = append(lines, fmt.Sprintf("- %s: %s", id, act))
 			}
 		}
-		// 添加该币种的结论
+
 		finalAction := strings.TrimSpace(sym.FinalAction)
 		if finalAction == "" {
 			finalAction = "HOLD"
@@ -153,7 +160,7 @@ func shouldShowMetaProviderWeight(weight float64) bool {
 	if weight <= 0 {
 		return false
 	}
-	// Only show when non-default to keep messages compact.
+
 	return math.Abs(weight-1.0) > 1e-9
 }
 
@@ -168,9 +175,6 @@ func formatMetaWeight(weight float64) string {
 }
 
 func (e *LiveEngine) notifyOpenAfterFill(ctx context.Context, d decision.Decision, fallbackPrice float64, validateIv string) {
-	// If no executor, just notify with fallback
-	// LiveEngine always has PosService, but maybe not ExecutionManager directly.
-	// We rely on PosService.ListPositions to find entry price.
 
 	symbol := strings.ToUpper(strings.TrimSpace(d.Symbol))
 	if symbol == "" {
@@ -276,8 +280,6 @@ func (e *LiveEngine) notifyOpen(ctx context.Context, d decision.Decision, entryP
 		sections = append(sections, notifier.MessageSection{Title: "仓位", Lines: tradeLines})
 	}
 
-	// Exit Plan logic requires ExitPlans registry or similar.
-	// LiveEngine has ExitPolicy which has ExitPlans.
 	if plan := e.renderExitPlanSummary(d.ExitPlan, d.ExitPlanVersion, entryPrice, side); plan != "" {
 		planLines := strings.Split(plan, "\n")
 		sections = append(sections, notifier.MessageSection{Title: "策略", Lines: planLines})

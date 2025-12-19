@@ -52,7 +52,6 @@ func (m *Manager) logPlanInit(ctx context.Context, tradeID int, planID, traceID,
 	}
 }
 
-// PublishPlanStateUpdate emits a plan state update event to the trader actor.
 func (m *Manager) PublishPlanStateUpdate(ctx context.Context, payload exchange.PlanStateUpdatePayload) error {
 	if m.trader == nil {
 		return fmt.Errorf("trader not initialized")
@@ -71,13 +70,11 @@ func (m *Manager) PublishPlanStateUpdate(ctx context.Context, payload exchange.P
 	return nil
 }
 
-// CacheDecision is used to cache exit_plan for entry_fill webhook to materialize strategy_instances.
 func (m *Manager) CacheDecision(key string, d decision.Decision) string {
 	m.cacheOpenExitPlan(key, d)
 	return key
 }
 
-// SyncStrategyPlans sends plan updates to Trader.
 func (m *Manager) SyncStrategyPlans(ctx context.Context, tradeID int, plans any) error {
 	if m.trader == nil {
 		return nil
@@ -106,12 +103,10 @@ func (m *Manager) SyncStrategyPlans(ctx context.Context, tradeID int, plans any)
 	return nil
 }
 
-// SetPlanUpdateHook sets the hook for plan updates.
 func (m *Manager) SetPlanUpdateHook(hook exchange.PlanUpdateHook) {
 	m.planUpdateHook = hook
 }
 
-// NotifyPlanUpdated is called by PlanScheduler when a plan changes.
 func (m *Manager) NotifyPlanUpdated(ctx context.Context, tradeID int) {
 	recs, err := m.posStore.ListStrategyInstances(ctx, tradeID)
 	if err != nil {
@@ -122,7 +117,6 @@ func (m *Manager) NotifyPlanUpdated(ctx context.Context, tradeID int) {
 	_ = m.SyncStrategyPlans(ctx, tradeID, snapshots)
 }
 
-// buildPlanSnapshots converts database records to plan snapshots.
 func buildPlanSnapshots(recs []database.StrategyInstanceRecord) []exit.StrategyPlanSnapshot {
 	if len(recs) == 0 {
 		return nil

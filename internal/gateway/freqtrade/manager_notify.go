@@ -83,9 +83,21 @@ func (m *Manager) sendExitFillNotification(ctx context.Context, msg exchange.Web
 	if stageTitle != "" {
 		title = fmt.Sprintf("%s %s", title, stageTitle)
 	}
-	lines := []string{
-		fmt.Sprintf("成交价 %.4f", payload.ClosePrice),
+	lines := m.buildExitNotificationLines(ctx, payload, symbol, tradeID, stageDetail)
+
+	msgBody := notifier.StructuredMessage{
+		Icon:      "🏁",
+		Title:     title,
+		Sections:  []notifier.MessageSection{{Title: "执行明细", Lines: lines}},
+		Timestamp: time.Now().UTC(),
 	}
+	if err := m.notifier.SendText(msgBody.RenderMarkdown()); err != nil {
+		logger.Warnf("Telegram 推送失败(exit_fill): %v", err)
+	}
+}
+
+func (m *Manager) buildExitNotificationLines(ctx context.Context, payload trader.PositionClosedPayload, symbol string, tradeID int, stageDetail string) []string {
+	lines := []string{fmt.Sprintf("成交价 %.4f", payload.ClosePrice)}
 	if payload.Amount > 0 {
 		lines = append(lines, fmt.Sprintf("本次成交 %.4f", payload.Amount))
 	}
@@ -100,9 +112,7 @@ func (m *Manager) sendExitFillNotification(ctx context.Context, msg exchange.Web
 		lines = append(lines, "策略阶段 "+strings.TrimSpace(payload.Reason))
 	}
 
-	pnlAbs := payload.PnL
-	pnlPct := payload.PnLPct
-	pctAlreadyPercent := false
+	pnlAbs, pnlPct, pctAlreadyPercent := payload.PnL, payload.PnLPct, false
 	if math.Abs(pnlAbs) < 1e-9 && math.Abs(pnlPct) < 1e-9 {
 		entry := m.lookupEntryPrice(ctx, tradeID, symbol)
 		side := m.lookupPositionSide(symbol, strings.ToLower(strings.TrimSpace(payload.Side)))
@@ -116,28 +126,23 @@ func (m *Manager) sendExitFillNotification(ctx context.Context, msg exchange.Web
 			pctAlreadyPercent = true
 		}
 	}
+
 	if math.Abs(pnlAbs) >= 1e-9 || math.Abs(pnlPct) >= 1e-9 {
-		displayPct := pnlPct
-		if !pctAlreadyPercent {
-			if math.Abs(displayPct) <= 2 {
-				displayPct = displayPct * 100
-			}
-		}
-		lines = append(lines, fmt.Sprintf("盈亏 %s · %s", formatSignedValue(pnlAbs), formatSignedPercent(displayPct)))
+		lines = append(lines, formatPnLLine(pnlAbs, pnlPct, pctAlreadyPercent))
 	}
 	if tradeID > 0 {
 		lines = append(lines, fmt.Sprintf("TradeID %d", tradeID))
 	}
+	return lines
+}
 
-	msgBody := notifier.StructuredMessage{
-		Icon:      "🏁",
-		Title:     title,
-		Sections:  []notifier.MessageSection{{Title: "执行明细", Lines: lines}},
-		Timestamp: time.Now().UTC(),
+func formatPnLLine(pnlAbs, pnlPct float64, pctAlreadyPercent bool) string {
+	displayPct := pnlPct
+	if !pctAlreadyPercent && math.Abs(displayPct) <= 2 {
+		displayPct = displayPct * 100
 	}
-	if err := m.notifier.SendText(msgBody.RenderMarkdown()); err != nil {
-		logger.Warnf("Telegram 推送失败(exit_fill): %v", err)
-	}
+	// Example: "盈亏 +12.34 · +5.67%"
+	return fmt.Sprintf("盈亏 %s · %s", formatSignedValue(pnlAbs), formatSignedPercent(displayPct))
 }
 
 func (m *Manager) lookupEntryPrice(ctx context.Context, tradeID int, symbol string) float64 {

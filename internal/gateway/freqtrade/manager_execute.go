@@ -12,7 +12,6 @@ import (
 	"brale/internal/trader"
 )
 
-// Execute calls freqtrade actions based on the decision.
 func (m *Manager) Execute(ctx context.Context, input decision.DecisionInput) error {
 	if m.trader == nil {
 		return fmt.Errorf("trader actor not initialized")
@@ -63,12 +62,14 @@ func (m *Manager) Execute(ctx context.Context, input decision.DecisionInput) err
 	}
 
 	eventID := managerEventID(input.TraceID, "decision")
-	m.trader.Send(trader.EventEnvelope{
+	if err := m.trader.Send(trader.EventEnvelope{
 		ID:        eventID,
 		Type:      evtType,
 		Payload:   payload,
 		CreatedAt: time.Now(),
 		Symbol:    strings.ToUpper(strings.TrimSpace(d.Symbol)),
-	})
+	}); err != nil {
+		return err
+	}
 	return nil
 }

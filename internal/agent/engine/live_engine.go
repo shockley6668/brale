@@ -210,14 +210,13 @@ func (e *LiveEngine) symbolSchedule(symbol string) (align time.Duration, interva
 }
 
 func (e *LiveEngine) tickSymbols(ctx context.Context, candidates []string) error {
-	// 1. Determine candidates
+
 	if len(candidates) == 0 {
 		return nil
 	}
 
 	start := time.Now()
 
-	// 2. Sense
 	input, err := e.sense(ctx, candidates)
 	if err != nil {
 		return err
@@ -225,7 +224,6 @@ func (e *LiveEngine) tickSymbols(ctx context.Context, candidates []string) error
 
 	logger.Infof("AI Decision Loop Start candidates=%d symbols=%v positions=%d", len(input.Candidates), input.Candidates, len(input.Positions))
 
-	// 3. Think
 	res, err := e.Decider.Decide(ctx, input)
 	if err != nil {
 		return err
@@ -253,11 +251,6 @@ func (e *LiveEngine) tickSymbols(ctx context.Context, candidates []string) error
 	return nil
 }
 
-// RunOnce executes a single decision cycle for a list of symbols.
-// This mirrors `processSymbol` in legacy but operates on a batch or single symbol?
-// Legacy `LiveService` loop iterates symbols and calls `processSymbol` (which might do batching internally if engine supports it? No, legacy engine did batching).
-// `LegacyEngineAdapter` supported batching.
-// Let's assume we pass all candidates relevant for a cycle.
 func (e *LiveEngine) RunCycle(ctx context.Context, symbols []string) error {
 	if len(symbols) == 0 {
 		return nil
@@ -358,6 +351,12 @@ func (e *LiveEngine) executeDecisions(ctx context.Context, decisions []decision.
 
 		accepted = append(accepted, d)
 
+		if e.Notifier != nil && e.PosService != nil {
+			if d.Action == "open_long" || d.Action == "open_short" {
+				e.notifyOpenAfterFill(ctx, d, marketPrice, "")
+			}
+		}
+
 		if d.Action == "open_long" || d.Action == "open_short" {
 			if newOpens >= e.Config.Advanced.MaxOpensPerCycle {
 				logger.Infof("Max opens reached, skipping %s", d.Symbol)
@@ -402,7 +401,7 @@ func (e *LiveEngine) sense(ctx context.Context, symbols []string) (decision.Cont
 	acct, err := e.PosService.GetAccountSnapshot(ctx)
 	if err != nil {
 		logger.Warnf("GetAccountSnapshot failed: %v", err)
-		// Continue with empty?
+
 	}
 	positions, err := e.PosService.ListPositions(ctx)
 	if err != nil {

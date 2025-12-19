@@ -5,7 +5,6 @@ import (
 	"time"
 )
 
-// Config 描述 Binance Source 运行所需的参数。
 type Config struct {
 	RESTBaseURL string
 	HTTPTimeout time.Duration

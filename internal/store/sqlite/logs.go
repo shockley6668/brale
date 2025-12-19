@@ -12,7 +12,6 @@ type logRepo struct {
 	db *gorm.DB
 }
 
-// NewLogRepo creates a new LogRepository.
 func NewLogRepo(db *gorm.DB) *logRepo {
 	return &logRepo{db: db}
 }

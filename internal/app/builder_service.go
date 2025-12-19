@@ -23,7 +23,6 @@ func buildFreqManager(cfg brcfg.FreqtradeConfig, horizon string, logStore *datab
 	}
 	logger.Infof("Freqtrade executor enabled: %s", cfg.APIURL)
 
-	// Adapter now resides in gateway/freqtrade
 	adapter := freqexec.NewAdapter(client, &cfg)
 	manager, err := freqexec.NewManager(client, cfg, logStore, liveStore, newStore, textNotifier, adapter)
 	if err != nil {

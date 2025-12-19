@@ -5,39 +5,129 @@ import (
 	"strings"
 )
 
-// 默认值常量
 const (
-	defaultAppEnv              = "dev"
-	defaultAppLogLevel         = "info"
-	defaultAppHTTPAddr         = ":9991"
-	defaultAppLogPath          = "/data/logs/brale-live.log"
-	defaultAppLLMLogPath       = "/data/logs/brale-llm.log"
-	defaultKlineMaxCached      = 300
-	defaultMarketName          = "binance"
-	defaultMarketREST          = "https://fapi.binance.com"
-	defaultAIAggregation       = "meta"
-	defaultAIDecisionLog       = "/data/live/decisions.db"
-	defaultAIDecisionOffset    = 10
-	defaultMCPTimeout          = 300
-	defaultFreqtradeAPI        = "http://freqtrade:8080/api/v1"
-	defaultFreqtradeStake      = 100
-	defaultFreqtradeLev        = 1
-	defaultFreqtradeTimeout    = 15
-	defaultFreqtradeWebhook    = "http://brale:9991/api/live/freqtrade/webhook"
-	defaultFreqtradeRiskDB     = "/data/db/trade_risk.db"
-	defaultAdvancedLiquidity   = 15
-	defaultAdvancedRR          = 1
-	defaultAdvancedCooldown    = 180
-	defaultAdvancedMaxOpen     = 3
+	// 应用运行环境 (dev/prod)
+	// 默认: "dev"
+	// 重置: app.env
+	defaultAppEnv = "dev"
+	// 日志级别 (debug/info/warn/error)
+	// 默认: "info"
+	// 重置: app.log_level
+	defaultAppLogLevel = "info"
+	// HTTP 服务监听地址
+	// 默认: ":9991"
+	// 重置: app.http_addr
+	defaultAppHTTPAddr = ":9991"
+	// 应用主日志文件路径
+	// 默认: "/data/logs/brale-live.log"
+	// 重置: app.log_path
+	defaultAppLogPath = "/data/logs/brale-live.log"
+	// LLM 交互日志文件路径
+	// 默认: "/data/logs/brale-llm.log"
+	// 重置: app.llm_log_path
+	defaultAppLLMLogPath = "/data/logs/brale-llm.log"
+
+	// K线数据最大缓存数量
+	// 默认: 300
+	// 重置: kline.max_cached
+	defaultKlineMaxCached = 300
+
+	// 默认市场交易所名称
+	// 默认: "binance"
+	// 重置: market.sources[0].name (当配置为空时)
+	defaultMarketName = "binance"
+	// 默认市场 REST API 地址
+	// 默认: "https://fapi.binance.com"
+	// 重置: market.sources[0].rest_base_url (当配置为空时)
+	defaultMarketREST = "https://fapi.binance.com"
+
+	// AI 决策聚合策略 (meta/first)
+	// 默认: "meta" (多模型投票)
+	// 重置: ai.aggregation
+	defaultAIAggregation = "meta"
+	// AI 决策日志数据库路径
+	// 默认: "/data/live/decisions.db"
+	// 重置: ai.decision_log_path
+	defaultAIDecisionLog = "/data/live/decisions.db"
+	// 决策执行偏移时间（秒），防止整点并发
+	// 默认: 10
+	// 重置: ai.decision_offset_seconds
+	defaultAIDecisionOffset = 10
+
+	// MCP 服务超时时间（秒）
+	// 默认: 300
+	// 重置: mcp.timeout_seconds
+	defaultMCPTimeout = 300
+
+	// Freqtrade API 地址
+	// 默认: "http://freqtrade:8080/api/v1"
+	// 重置: freqtrade.api_url
+	defaultFreqtradeAPI = "http://freqtrade:8080/api/v1"
+	// Freqtrade 默认每单金额 (USD)
+	// 默认: 100
+	// 重置: freqtrade.default_stake_usd
+	defaultFreqtradeStake = 100
+	// Freqtrade 默认杠杆倍数
+	// 默认: 1
+	// 重置: freqtrade.default_leverage
+	defaultFreqtradeLev = 1
+	// Freqtrade 请求超时时间（秒）
+	// 默认: 15
+	// 重置: freqtrade.timeout_seconds
+	defaultFreqtradeTimeout = 15
+	// Brale 接收 Freqtrade Webhook 的地址
+	// 默认: "http://brale:9991/api/live/freqtrade/webhook"
+	// 重置: freqtrade.webhook_url
+	defaultFreqtradeWebhook = "http://brale:9991/api/live/freqtrade/webhook"
+	// Freqtrade 风险数据库路径
+	// 默认: "/data/db/trade_risk.db"
+	// 重置: freqtrade.risk_store_path
+	defaultFreqtradeRiskDB = "/data/db/trade_risk.db"
+
+	// 高级配置：最小流动性过滤 (百万 USD)
+	// 默认: 15
+	// 重置: advanced.liquidity_filter_usd_m
+	defaultAdvancedLiquidity = 15
+	// 高级配置：最小盈亏比要求
+	// 默认: 1 (R:R >= 1:1)
+	// 重置: advanced.min_risk_reward
+	defaultAdvancedRR = 1
+	// 高级配置：开仓冷却时间（秒）
+	// 默认: 180 (3分钟)
+	// 重置: advanced.open_cooldown_seconds
+	defaultAdvancedCooldown = 180
+	// 高级配置：每个周期最大开仓数量
+	// 默认: 3
+	// 重置: advanced.max_opens_per_cycle
+	defaultAdvancedMaxOpen = 3
+	// 高级配置：退出计划刷新间隔（秒）
+	// 默认: 5
+	// 重置: advanced.plan_refresh_interval_seconds
 	defaultAdvancedPlanRefresh = 5
-	defaultTradingMode         = "static"
-	defaultTradingMaxPct       = 0.01
-	defaultTradingLeverage     = 10
-	defaultProfilesPath        = "configs/profiles.yaml"
-	defaultExitPlanPath        = "configs/exit_strategies.yaml"
+
+	// 交易模式 (static/dynamic)
+	// 默认: "static"
+	// 重置: trading.mode
+	defaultTradingMode = "static"
+	// 最大单仓位资产占比 (0.01 = 1%)
+	// 默认: 0.01
+	// 重置: trading.max_position_pct
+	defaultTradingMaxPct = 0.01
+	// 默认交易杠杆
+	// 默认: 10
+	// 重置: trading.default_leverage
+	defaultTradingLeverage = 10
+
+	// 币种 Profile 配置文件路径
+	// 默认: "configs/profiles.yaml"
+	// 重置: ai.profiles_path
+	defaultProfilesPath = "configs/profiles.yaml"
+	// 退出策略配置文件路径
+	// 默认: "configs/exit_strategies.yaml"
+	// 重置: ai.exit_strategies_path
+	defaultExitPlanPath = "configs/exit_strategies.yaml"
 )
 
-// applyDefaults 为所有子配置应用默认值。
 func (c *Config) applyDefaults(keys keySet) {
 	c.App.applyDefaults(keys)
 	c.Kline.applyDefaults(keys)
@@ -266,8 +356,6 @@ func (m *MarketConfig) applyDefaults(keys keySet) {
 		m.ActiveSource = firstEnabledMarket(m.Sources)
 	}
 }
-
-// Helper functions
 
 func applyFieldDefaults(keys keySet, defs ...fieldDefault) {
 	for _, def := range defs {

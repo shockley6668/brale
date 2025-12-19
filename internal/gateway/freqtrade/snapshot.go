@@ -15,97 +15,6 @@ import (
 	"brale/internal/trader"
 )
 
-func snapshotPositions(state *trader.State, filter string, page, limit int) *exchange.PositionListResult {
-	if state == nil || len(state.Positions) == 0 {
-		return nil
-	}
-	symbols := make([]string, 0, len(state.Positions))
-	for sym := range state.Positions {
-		if filter != "" && !strings.EqualFold(filter, sym) {
-			continue
-		}
-		symbols = append(symbols, sym)
-	}
-	if len(symbols) == 0 {
-		return &exchange.PositionListResult{TotalCount: 0, Page: page, PageSize: limit}
-	}
-	sort.Strings(symbols)
-	if limit <= 0 {
-		limit = 100
-	}
-	if page < 1 {
-		page = 1
-	}
-	start := (page - 1) * limit
-	end := start + limit
-	if start > len(symbols) {
-		start = len(symbols)
-	}
-	if end > len(symbols) {
-		end = len(symbols)
-	}
-	slice := symbols[start:end]
-	positions := make([]exchange.APIPosition, 0, len(slice))
-	now := time.Now()
-	for _, symbol := range slice {
-		pos := state.Positions[symbol]
-		tradeIDStr := state.SymbolIndex[symbol]
-		tradeID, _ := strconv.Atoi(tradeIDStr)
-		openedAt := pos.OpenedAt
-		if openedAt.IsZero() {
-			openedAt = pos.UpdatedAt
-		}
-		holdingMs := positionHoldingMs(openedAt, now, time.Time{})
-		status := "open"
-		if !pos.IsOpen {
-			status = "closed"
-		}
-		apiPos := exchange.APIPosition{
-			TradeID:            tradeID,
-			Symbol:             symbol,
-			Side:               pos.Side,
-			EntryPrice:         pos.EntryPrice,
-			Amount:             pos.Amount,
-			InitialAmount:      pos.InitialAmount,
-			Stake:              pos.StakeAmount,
-			Leverage:           pos.Leverage,
-			PositionValue:      0,
-			OpenedAt:           openedAt.UnixMilli(),
-			HoldingMs:          holdingMs,
-			StopLoss:           pos.StopLoss,
-			TakeProfit:         pos.TakeProfit,
-			CurrentPrice:       firstNonZero(pos.CurrentPrice, pos.EntryPrice),
-			PnLRatio:           firstNonZero(pos.UnrealizedPnLRatio, pos.RealizedPnLRatio),
-			PnLUSD:             firstNonZero(pos.UnrealizedPnL, pos.RealizedPnL),
-			RealizedPnLRatio:   pos.RealizedPnLRatio,
-			RealizedPnLUSD:     pos.RealizedPnL,
-			UnrealizedPnLRatio: pos.UnrealizedPnLRatio,
-			UnrealizedPnLUSD:   pos.UnrealizedPnL,
-			Status:             status,
-		}
-		ref := apiPos.CurrentPrice
-		if ref <= 0 {
-			ref = apiPos.EntryPrice
-		}
-		if apiPos.Amount > 0 && ref > 0 {
-			apiPos.PositionValue = apiPos.Amount * ref
-		} else if apiPos.Stake > 0 && apiPos.Leverage > 0 {
-			apiPos.PositionValue = apiPos.Stake * apiPos.Leverage
-		}
-		if apiPos.InitialAmount > 0 && apiPos.Amount > 0 {
-			apiPos.RemainingRatio = apiPos.Amount / apiPos.InitialAmount
-		}
-		positions = append(positions, apiPos)
-	}
-	res := exchange.PositionListResult{
-		TotalCount: len(symbols),
-		Page:       page,
-		PageSize:   limit,
-		Positions:  positions,
-	}
-	return &res
-}
-
 func snapshotDecisionPositions(state *trader.State) []decision.PositionSnapshot {
 	if state == nil || len(state.Positions) == 0 {
 		return nil
@@ -247,7 +156,6 @@ func snapshotTradeEvents(state *trader.State, tradeID int, limit int) []exchange
 	return convertToExchangeTradeEvents(events)
 }
 
-// convertToExchangeTradeEvents converts database records to exchange types
 func convertToExchangeTradeEvents(recs []database.TradeOperationRecord) []exchange.TradeEvent {
 	if len(recs) == 0 {
 		return nil

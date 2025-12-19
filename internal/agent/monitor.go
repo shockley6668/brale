@@ -14,7 +14,6 @@ import (
 	"brale/internal/market"
 )
 
-// PriceObserver defines a consumer of real-time price updates.
 type PriceObserver interface {
 	NotifyPrice(symbol string, price float64)
 }

@@ -17,7 +17,6 @@ import (
 	"brale/internal/store"
 )
 
-// AnalysisContext 汇集单个 symbol+interval 的结构化分析结果。
 type AnalysisContext struct {
 	Symbol          string `json:"symbol"`
 	Interval        string `json:"interval"`
@@ -31,7 +30,6 @@ type AnalysisContext struct {
 	ForecastHorizon string `json:"forecast_horizon"`
 }
 
-// AnalysisBuildInput 生成分析上下文所需的参数。
 type AnalysisBuildInput struct {
 	Context           context.Context
 	Exporter          store.SnapshotExporter
@@ -49,10 +47,36 @@ type AnalysisBuildInput struct {
 
 const defaultIndicatorLookback = 240
 
-// BuildAnalysisContexts 批量生成 AnalysisContext。
 func BuildAnalysisContexts(input AnalysisBuildInput) []AnalysisContext {
-	if input.Exporter == nil {
+	cfg, ok := normalizeAnalysisBuildInput(input)
+	if !ok {
 		return nil
+	}
+	result := make([]AnalysisContext, 0, len(cfg.symbols)*len(cfg.intervals))
+	for _, rawSym := range cfg.symbols {
+		result = append(result, buildAnalysisContextsForSymbol(cfg, rawSym)...)
+	}
+	return result
+}
+
+type analysisBuildConfig struct {
+	ctx               context.Context
+	exporter          store.SnapshotExporter
+	symbols           []string
+	intervals         []string
+	limit             int
+	sliceLen          int
+	sliceDrop         int
+	horizonName       string
+	indicatorLookback int
+	withImages        bool
+	disableIndicators bool
+	requireATR        bool
+}
+
+func normalizeAnalysisBuildInput(input AnalysisBuildInput) (analysisBuildConfig, bool) {
+	if input.Exporter == nil {
+		return analysisBuildConfig{}, false
 	}
 	ctx := input.Context
 	if ctx == nil {
@@ -62,8 +86,6 @@ func BuildAnalysisContexts(input AnalysisBuildInput) []AnalysisContext {
 	if limit <= 0 {
 		limit = 240
 	}
-	sliceLen := input.SliceLength
-	sliceDrop := input.SliceDrop
 	intervals := input.Intervals
 	if len(intervals) == 0 {
 		intervals = []string{"1h"}
@@ -72,153 +94,208 @@ func BuildAnalysisContexts(input AnalysisBuildInput) []AnalysisContext {
 	if indicatorLookback <= 0 {
 		indicatorLookback = defaultIndicatorLookback
 	}
-	result := make([]AnalysisContext, 0, len(input.Symbols)*len(intervals))
-	generateImages := input.WithImages
-	for _, rawSym := range input.Symbols {
-		sym := strings.ToUpper(strings.TrimSpace(rawSym))
-		if sym == "" {
-			continue
-		}
-		var symContexts []AnalysisContext
+	return analysisBuildConfig{
+		ctx:               ctx,
+		exporter:          input.Exporter,
+		symbols:           input.Symbols,
+		intervals:         intervals,
+		limit:             limit,
+		sliceLen:          input.SliceLength,
+		sliceDrop:         input.SliceDrop,
+		horizonName:       input.HorizonName,
+		indicatorLookback: indicatorLookback,
+		withImages:        input.WithImages,
+		disableIndicators: input.DisableIndicators,
+		requireATR:        input.RequireATR,
+	}, true
+}
 
-		for _, rawIv := range intervals {
-			iv := strings.TrimSpace(rawIv)
-			if iv == "" {
-				continue
-			}
-			effectiveSlice := enforceIntervalSliceLimit(iv, sliceLen)
-			candles, err := input.Exporter.Export(ctx, sym, iv, limit)
-			if err != nil {
-				logger.Debugf("analysis/export 失败 %s %s: %v", sym, iv, err)
-				continue
-			}
-			if len(candles) == 0 {
-				continue
-			}
-			if dur, ok := scheduler.ParseIntervalDuration(iv); ok {
-				candles = scheduler.DropUnclosedBinanceKline(candles, dur)
-				if len(candles) == 0 {
-					continue
-				}
-			}
-			fullCandles := cloneRoundedCandles(candles)
-			shortCandles := trimCandlesWindow(fullCandles, effectiveSlice, sliceDrop)
-			if len(shortCandles) == 0 {
-				logger.Debugf("analysis trim %s %s 结果为空，保留原始 %d 根", sym, iv, len(fullCandles))
-				shortCandles = fullCandles
-			} else if len(shortCandles) != len(fullCandles) {
-				logger.Debugf("analysis trim %s %s: %d -> %d (slice=%d drop=%d)", sym, iv, len(fullCandles), len(shortCandles), sliceLen, sliceDrop)
-			}
-			candles = shortCandles
-
-			sourceCandles := trimCandlesWindow(fullCandles, 0, sliceDrop)
-			if len(sourceCandles) == 0 {
-				sourceCandles = fullCandles
-			}
-			rawJSON, err := json.Marshal(sourceCandles)
-			if err != nil {
-				logger.Warnf("analysis/json 序列化失败 %s %s: %v", sym, iv, err)
-				continue
-			}
-			csvData := ""
-			if len(shortCandles) > 0 {
-				csvData = BuildCandleCSV(shortCandles, CandleCSVOptions{
-					Location:       time.UTC,
-					PricePrecision: PrecisionAuto,
-					Interval:       iv,
-				})
-			}
-			indJSON := ""
-			var (
-				rep        indicator.Report
-				indErr     error
-				calculated bool
-			)
-			switch {
-			case !input.DisableIndicators:
-				calculated = true
-				if len(fullCandles) >= indicatorLookback {
-					rep, indErr = indicator.ComputeAll(fullCandles, indicator.Settings{
-						Symbol:   sym,
-						Interval: iv,
-					})
-				} else {
-					indErr = fmt.Errorf("insufficient history: need %d got %d", indicatorLookback, len(fullCandles))
-					logger.Debugf("analysis %s %s 指标历史不足，需要 %d 根，当前仅 %d 根", sym, iv, indicatorLookback, len(fullCandles))
-				}
-			case input.RequireATR:
-				calculated = true
-				var series []float64
-				series, indErr = indicator.ComputeATRSeries(fullCandles, 14)
-				if indErr == nil {
-					rep = indicator.Report{
-						Symbol:   sym,
-						Interval: iv,
-						Count:    len(fullCandles),
-						Values: map[string]indicator.IndicatorValue{
-							"atr": {
-								Latest: series[len(series)-1],
-								Series: series,
-								Note:   "period=14",
-								State:  "volatility",
-							},
-						},
-					}
-				}
-			}
-			if indErr == nil && calculated {
-				if payload, err := BuildIndicatorSnapshot(fullCandles, rep); err == nil {
-					indJSON = string(payload)
-				} else {
-					logger.Warnf("indicator snapshot 构建失败 %s %s: %v", sym, iv, err)
-				}
-				if len(shortCandles) > 0 && len(shortCandles) < len(fullCandles) {
-					rep = clipIndicatorReport(rep, len(shortCandles))
-				}
-			} else if indErr != nil && calculated {
-				logger.Warnf("indicator compute 失败 %s %s: %v", sym, iv, indErr)
-			}
-			pat := pattern.Analyze(candles)
-			trendReport := pat.TrendSummary
-			if pat.Bias != "" {
-				trendReport = fmt.Sprintf("%s | bias=%s", pat.TrendSummary, pat.Bias)
-			}
-
-			ac := AnalysisContext{
-				Symbol:          sym,
-				Interval:        iv,
-				KlineJSON:       string(rawJSON),
-				KlineCSV:        csvData,
-				IndicatorJSON:   indJSON,
-				PatternReport:   pat.PatternSummary,
-				TrendReport:     trendReport,
-				ForecastHorizon: input.HorizonName,
-			}
-			if generateImages && calculated && indErr == nil {
-				imgInput := visual.CompositeInput{
-					Context:    ctx,
-					Symbol:     sym,
-					Horizon:    input.HorizonName,
-					Intervals:  []string{iv},
-					Candles:    map[string][]market.Candle{iv: candles},
-					Indicators: map[string]indicator.Report{iv: rep},
-					Patterns:   map[string]pattern.Result{iv: pat},
-				}
-				if img, renderErr := visual.RenderComposite(imgInput); renderErr == nil {
-					ac.ImageB64 = img.DataURI()
-					ac.ImageNote = img.Description
-				} else {
-					logger.Warnf("interval render 失败 %s %s: %v", sym, iv, renderErr)
-				}
-			}
-			symContexts = append(symContexts, ac)
-		}
-		if len(symContexts) == 0 {
-			continue
-		}
-		result = append(result, symContexts...)
+func buildAnalysisContextsForSymbol(cfg analysisBuildConfig, rawSym string) []AnalysisContext {
+	sym := strings.ToUpper(strings.TrimSpace(rawSym))
+	if sym == "" {
+		return nil
 	}
-	return result
+	out := make([]AnalysisContext, 0, len(cfg.intervals))
+	for _, rawIv := range cfg.intervals {
+		ac, ok := buildAnalysisContextForSymbolInterval(cfg, sym, rawIv)
+		if !ok {
+			continue
+		}
+		out = append(out, ac)
+	}
+	return out
+}
+
+func buildAnalysisContextForSymbolInterval(cfg analysisBuildConfig, sym string, rawIv string) (AnalysisContext, bool) {
+	iv := strings.TrimSpace(rawIv)
+	if iv == "" {
+		return AnalysisContext{}, false
+	}
+	effectiveSlice := enforceIntervalSliceLimit(iv, cfg.sliceLen)
+	candles := exportCandles(cfg, sym, iv)
+	if len(candles) == 0 {
+		return AnalysisContext{}, false
+	}
+
+	fullCandles, shortCandles, sourceCandles := prepareCandles(sym, iv, candles, effectiveSlice, cfg.sliceLen, cfg.sliceDrop)
+	rawJSON, ok := marshalCandlesJSON(sym, iv, sourceCandles)
+	if !ok {
+		return AnalysisContext{}, false
+	}
+	csvData := buildCandleCSVData(shortCandles, iv)
+
+	indJSON, rep, calculated, indErr := buildIndicatorPayload(cfg, sym, iv, fullCandles, shortCandles)
+	if indErr != nil && calculated {
+		logger.Warnf("indicator compute 失败 %s %s: %v", sym, iv, indErr)
+	}
+
+	pat := pattern.Analyze(shortCandles)
+	trendReport := formatTrendReport(pat)
+
+	ac := AnalysisContext{
+		Symbol:          sym,
+		Interval:        iv,
+		KlineJSON:       rawJSON,
+		KlineCSV:        csvData,
+		IndicatorJSON:   indJSON,
+		PatternReport:   pat.PatternSummary,
+		TrendReport:     trendReport,
+		ForecastHorizon: cfg.horizonName,
+	}
+	if cfg.withImages && calculated && indErr == nil {
+		ac.ImageB64, ac.ImageNote = renderComposite(cfg.ctx, sym, iv, cfg.horizonName, shortCandles, rep, pat)
+	}
+	return ac, true
+}
+
+func exportCandles(cfg analysisBuildConfig, sym string, iv string) []market.Candle {
+	candles, err := cfg.exporter.Export(cfg.ctx, sym, iv, cfg.limit)
+	if err != nil {
+		logger.Debugf("analysis/export 失败 %s %s: %v", sym, iv, err)
+		return nil
+	}
+	if len(candles) == 0 {
+		return nil
+	}
+	if dur, ok := scheduler.ParseIntervalDuration(iv); ok {
+		candles = scheduler.DropUnclosedBinanceKline(candles, dur)
+	}
+	return candles
+}
+
+func prepareCandles(sym, iv string, candles []market.Candle, effectiveSlice, sliceLen, sliceDrop int) ([]market.Candle, []market.Candle, []market.Candle) {
+	fullCandles := cloneRoundedCandles(candles)
+	shortCandles := trimCandlesWindow(fullCandles, effectiveSlice, sliceDrop)
+	if len(shortCandles) == 0 {
+		logger.Debugf("analysis trim %s %s 结果为空，保留原始 %d 根", sym, iv, len(fullCandles))
+		shortCandles = fullCandles
+	} else if len(shortCandles) != len(fullCandles) {
+		logger.Debugf("analysis trim %s %s: %d -> %d (slice=%d drop=%d)", sym, iv, len(fullCandles), len(shortCandles), sliceLen, sliceDrop)
+	}
+
+	sourceCandles := trimCandlesWindow(fullCandles, 0, sliceDrop)
+	if len(sourceCandles) == 0 {
+		sourceCandles = fullCandles
+	}
+	return fullCandles, shortCandles, sourceCandles
+}
+
+func marshalCandlesJSON(sym, iv string, candles []market.Candle) (string, bool) {
+	rawJSON, err := json.Marshal(candles)
+	if err != nil {
+		logger.Warnf("analysis/json 序列化失败 %s %s: %v", sym, iv, err)
+		return "", false
+	}
+	return string(rawJSON), true
+}
+
+func buildCandleCSVData(shortCandles []market.Candle, iv string) string {
+	if len(shortCandles) == 0 {
+		return ""
+	}
+	return BuildCandleCSV(shortCandles, CandleCSVOptions{
+		Location:       time.UTC,
+		PricePrecision: PrecisionAuto,
+		Interval:       iv,
+	})
+}
+
+func buildIndicatorPayload(cfg analysisBuildConfig, sym, iv string, fullCandles, shortCandles []market.Candle) (string, indicator.Report, bool, error) {
+	rep, calculated, err := computeIndicators(cfg, sym, iv, fullCandles)
+	if err != nil || !calculated {
+		return "", rep, calculated, err
+	}
+
+	indJSON := ""
+	if payload, snapErr := BuildIndicatorSnapshot(fullCandles, rep); snapErr == nil {
+		indJSON = string(payload)
+	} else {
+		logger.Warnf("indicator snapshot 构建失败 %s %s: %v", sym, iv, snapErr)
+	}
+	if len(shortCandles) > 0 && len(shortCandles) < len(fullCandles) {
+		rep = clipIndicatorReport(rep, len(shortCandles))
+	}
+	return indJSON, rep, calculated, err
+}
+
+func computeIndicators(cfg analysisBuildConfig, sym, iv string, fullCandles []market.Candle) (indicator.Report, bool, error) {
+	switch {
+	case !cfg.disableIndicators:
+		if len(fullCandles) < cfg.indicatorLookback {
+			err := fmt.Errorf("insufficient history: need %d got %d", cfg.indicatorLookback, len(fullCandles))
+			logger.Debugf("analysis %s %s 指标历史不足，需要 %d 根，当前仅 %d 根", sym, iv, cfg.indicatorLookback, len(fullCandles))
+			return indicator.Report{}, true, err
+		}
+		rep, err := indicator.ComputeAll(fullCandles, indicator.Settings{Symbol: sym, Interval: iv})
+		return rep, true, err
+	case cfg.requireATR:
+		series, err := indicator.ComputeATRSeries(fullCandles, 14)
+		if err != nil {
+			return indicator.Report{}, true, err
+		}
+		rep := indicator.Report{
+			Symbol:   sym,
+			Interval: iv,
+			Count:    len(fullCandles),
+			Values: map[string]indicator.IndicatorValue{
+				"atr": {
+					Latest: series[len(series)-1],
+					Series: series,
+					Note:   "period=14",
+					State:  "volatility",
+				},
+			},
+		}
+		return rep, true, nil
+	default:
+		return indicator.Report{}, false, nil
+	}
+}
+
+func formatTrendReport(pat pattern.Result) string {
+	trendReport := pat.TrendSummary
+	if pat.Bias != "" {
+		trendReport = fmt.Sprintf("%s | bias=%s", pat.TrendSummary, pat.Bias)
+	}
+	return trendReport
+}
+
+func renderComposite(ctx context.Context, sym, iv, horizon string, candles []market.Candle, rep indicator.Report, pat pattern.Result) (string, string) {
+	imgInput := visual.CompositeInput{
+		Context:    ctx,
+		Symbol:     sym,
+		Horizon:    horizon,
+		Intervals:  []string{iv},
+		Candles:    map[string][]market.Candle{iv: candles},
+		Indicators: map[string]indicator.Report{iv: rep},
+		Patterns:   map[string]pattern.Result{iv: pat},
+	}
+	img, err := visual.RenderComposite(imgInput)
+	if err != nil {
+		logger.Warnf("interval render 失败 %s %s: %v", sym, iv, err)
+		return "", ""
+	}
+	return img.DataURI(), img.Description
 }
 
 func trimCandlesWindow(candles []market.Candle, sliceLen, dropTail int) []market.Candle {

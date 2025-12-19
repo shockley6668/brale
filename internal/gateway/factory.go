@@ -9,7 +9,6 @@ import (
 	"brale/internal/market"
 )
 
-// NewSourceFromConfig 根据配置创建市场数据源。
 func NewSourceFromConfig(cfg *brcfg.Config) (market.Source, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("nil config")

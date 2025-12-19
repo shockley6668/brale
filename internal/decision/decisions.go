@@ -2,7 +2,6 @@ package decision
 
 import "strings"
 
-// NormalizeAndAlignDecisions 会先对动作做归一化，再结合当前持仓调整 close_* 方向。
 func NormalizeAndAlignDecisions(ds []Decision, positions []PositionSnapshot) []Decision {
 	if len(ds) == 0 {
 		return ds
@@ -59,7 +58,6 @@ func AlignCloseActions(ds []Decision, positions []PositionSnapshot) []Decision {
 	return ds
 }
 
-// AttachDecisionProfiles 缺省情况下补齐 profile/context_tag，方便后续归档。
 func AttachDecisionProfiles(ds []Decision, reports []FeatureReport) {
 	if len(ds) == 0 || len(reports) == 0 {
 		return
@@ -103,7 +101,6 @@ func AttachDecisionProfiles(ds []Decision, reports []FeatureReport) {
 	}
 }
 
-// NormalizeAction 统一动作名称，兼容 buy/long 等同义词
 func NormalizeAction(a string) string {
 	replacer := strings.NewReplacer(" ", "_", "-", "_")
 	a = strings.ToLower(strings.TrimSpace(a))
@@ -132,9 +129,6 @@ func NormalizeAction(a string) string {
 	}
 }
 
-// OrderAndDedup 决策排序与去重：
-// - 优先级：close_* > open_* > hold/wait
-// - 防重复：同一币种同方向的 open_* 仅保留第一条
 func OrderAndDedup(ds []Decision) []Decision {
 	if len(ds) <= 1 {
 		return ds

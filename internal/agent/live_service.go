@@ -14,7 +14,7 @@ import (
 	"brale/internal/decision"
 	"brale/internal/exitplan"
 	"brale/internal/gateway/database"
-	"brale/internal/gateway/notifier" // Used if we add logging
+	"brale/internal/gateway/notifier"
 	"brale/internal/market"
 	"brale/internal/profile"
 	promptkit "brale/internal/prompt"
@@ -106,25 +106,19 @@ func NewLiveService(p LiveServiceParams) *LiveService {
 		})
 	}
 
-	// --- New Architecture Initialization ---
-
-	// 1. Position Service
 	posSvc := position.NewService(p.ExecManager)
 
-	// 2. Market Service
-	// We need to ensure we pass the correct interfaces/structs
 	mktParams := mktsvc.ServiceParams{
 		Config:      p.Config,
 		KlineStore:  p.KlineStore,
 		ProfileMgr:  p.ProfileManager,
-		Monitor:     monitor, // monitor implements PriceSource ideally
+		Monitor:     monitor,
 		Intervals:   intervals,
 		HorizonName: p.HorizonName,
 		VisionReady: p.VisionReady,
 	}
 	mktSvc := mktsvc.NewService(mktParams)
 
-	// 3. Live Engine
 	engParams := engine.EngineParams{
 		Config:          p.Config,
 		PosService:      posSvc,
@@ -142,7 +136,7 @@ func NewLiveService(p LiveServiceParams) *LiveService {
 
 	svc := &LiveService{
 		cfg:            p.Config,
-		liveEngine:     liveEngine, // internal/agent/engine
+		liveEngine:     liveEngine,
 		tg:             p.Telegram,
 		decLogs:        p.DecisionLogs,
 		horizonName:    p.HorizonName,
@@ -167,9 +161,7 @@ func NewLiveService(p LiveServiceParams) *LiveService {
 	}
 	if svc.planScheduler != nil && svc.execManager != nil {
 		svc.execManager.SetPlanUpdateHook(svc.planScheduler)
-		// Sync strategies using new PositionService as well if needed,
-		// but Scheduler usually handles this.
-		// posSvc.SyncStrategies(context.Background(), svc.planScheduler)
+
 	}
 	return svc
 }

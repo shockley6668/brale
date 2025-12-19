@@ -22,7 +22,6 @@ const (
 	defaultChildAliasPref = "comp"
 )
 
-// comboHandler 将多个子 handler 组合成一个 plan。
 type comboHandler struct {
 	reg *exit.HandlerRegistry
 }

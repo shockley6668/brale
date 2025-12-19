@@ -13,7 +13,6 @@ import (
 	"brale/internal/logger"
 )
 
-// OpenAIChatClient：兼容 OpenAI / DeepSeek / Qwen 的聊天补全接口（/v1/chat/completions）。
 type OpenAIChatClient struct {
 	BaseURL      string
 	APIKey       string
@@ -90,13 +89,15 @@ func (c *OpenAIChatClient) Call(ctx context.Context, payload ChatPayload) (strin
 						Content string `json:"content"`
 					} `json:"message"`
 				} `json:"choices"`
-			}
-			derr := json.NewDecoder(resp.Body).Decode(&r)
-			resp.Body.Close()
-			if derr != nil {
-				lastErr = derr
-				break
-			}
+				}
+				derr := json.NewDecoder(resp.Body).Decode(&r)
+				if cerr := resp.Body.Close(); cerr != nil {
+					logger.Debugf("[AI] response body close failed: %v", cerr)
+				}
+				if derr != nil {
+					lastErr = derr
+					break
+				}
 			if len(r.Choices) == 0 {
 				lastErr = fmt.Errorf("empty choices")
 				break
@@ -169,7 +170,11 @@ func buildUserContent(payload ChatPayload) map[string]any {
 }
 
 func parseError(resp *http.Response) string {
-	defer resp.Body.Close()
+	defer func() {
+		if cerr := resp.Body.Close(); cerr != nil {
+			logger.Debugf("[AI] response body close failed: %v", cerr)
+		}
+	}()
 	var eresp struct {
 		Error struct {
 			Message string `json:"message"`
@@ -201,7 +206,6 @@ func redactHeaders(headers map[string]string) map[string]string {
 	return headers
 }
 
-// OpenAIModelProvider：实现 ModelProvider
 type OpenAIModelProvider struct {
 	id             string
 	enabled        bool

@@ -1,6 +1,5 @@
 package exit
 
-// StrategyPlanSnapshot represents a snapshot of a strategy instance plan.
 type StrategyPlanSnapshot struct {
 	PlanID          string `json:"plan_id"`
 	PlanComponent   string `json:"plan_component"`

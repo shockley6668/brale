@@ -24,11 +24,6 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// 中文说明：
-// LegacyEngineAdapter：沿用“旧版思路”的提示词结构（System 模板 + User 数据摘要），
-// 但底层通过 ModelProvider 调用，并用 JSON 数组解析为决策结果；
-// 后续可替换为严格对接旧版 decision/engine.go（需要完整账户/持仓/指标上下文）。
-
 type LegacyEngineAdapter struct {
 	Providers     []provider.ModelProvider
 	Agg           Aggregator
@@ -36,14 +31,14 @@ type LegacyEngineAdapter struct {
 	AgentNotifier notifier.TextNotifier
 	AgentHistory  AgentOutputHistory
 
-	PromptMgr      *strategy.Manager // 提示词管理器
-	SystemTemplate string            // 使用的系统模板名
+	PromptMgr      *strategy.Manager
+	SystemTemplate string
 
-	KStore      market.KlineStore // K线存储（用于构建 User 摘要）
-	Intervals   []string          // 要在摘要中展示的周期
+	KStore      market.KlineStore
+	Intervals   []string
 	HorizonName string
 	MultiAgent  brcfg.MultiAgentConfig
-	// ProviderPreference 控制同权重/同动作时的模型优先级，按配置顺序匹配。
+
 	ProviderPreference []string
 	FinalDisabled      map[string]bool
 
@@ -51,17 +46,14 @@ type LegacyEngineAdapter struct {
 
 	Name_ string
 
-	Parallel bool // 并行调用多个模型
+	Parallel bool
 
-	// 是否为每个模型分别输出思维链与JSON（便于对比调参）
 	LogEachModel bool
-	// 是否在日志中输出 Structured Blocks 调试提示
+
 	DebugStructuredBlocks bool
 
-	// 可选：补充 OI 与资金费率
 	Metrics *market.MetricsService
 
-	// 调用超时（秒）：限制单模型调用最长时间，避免卡死
 	TimeoutSeconds int
 }
 
@@ -74,23 +66,30 @@ func (e *LegacyEngineAdapter) Name() string {
 	return "legacy-adapter"
 }
 
-// Decide 构建 System/User 提示词 → 调用多个模型 → 聚合 → 解析 JSON 决策
+// Decide is the main entry point for the decision engine.
+// Supports both single-symbol and multi-symbol (batch) analysis.
+//
+// Logic:
+// 1. Groups analysis contexts by symbol.
+// 2. If single symbol: directly calls decideSingle.
+// 3. If multiple symbols:
+//   - Iterates through symbols sequentially (to manage rate limits/context).
+//   - Aggregates results into a single DecisionResult.
+//   - Merges meta-voting breakdowns if available.
 func (e *LegacyEngineAdapter) Decide(ctx context.Context, input Context) (DecisionResult, error) {
 	order, grouped := groupAnalysisBySymbol(input.Analysis, input.Candidates)
-	// 没有可拆分或仅单币种，沿用旧逻辑
+
 	if len(order) <= 1 {
-		// 无论何种情况，进入 decideSingle 前都应清空 Prompt.User，
-		// 因为 buildUserSummary -> renderOutputConstraints 会重新根据 ProfilePrompts 渲染 UserPrompt。
-		// 如果不清空，composePrompts 会将 input.Prompt.User (bundle) 追加在末尾，导致 UserPrompt 内容重复 (一次在 Guidelines, 一次在 userExtra)。
+
 		input.Prompt.User = ""
 
 		if len(order) == 1 {
 			sym := order[0]
 			input.Candidates = []string{sym}
 			input.Analysis = CloneSlice(grouped[sym])
-			// 过滤 ProfilePrompts，只保留当前 symbol 的配置
+
 			input.ProfilePrompts = filterProfilePrompts(input.ProfilePrompts, sym)
-			// 过滤 Positions，只保留当前 symbol 的持仓
+
 			input.Positions = filterPositions(input.Positions, input.Candidates)
 		}
 		return e.decideSingle(ctx, input, true)
@@ -106,12 +105,11 @@ func (e *LegacyEngineAdapter) Decide(ctx context.Context, input Context) (Decisi
 		symInput := input
 		symInput.Candidates = []string{sym}
 		symInput.Analysis = CloneSlice(grouped[sym])
-		// 过滤 ProfilePrompts，只保留当前 symbol 的配置，避免输出其他 symbol 的约束
+
 		symInput.ProfilePrompts = filterProfilePrompts(input.ProfilePrompts, sym)
-		// 清空 Prompt.User，避免追加所有 profiles 的 user template（已通过 ProfilePrompts 处理）
+
 		symInput.Prompt.User = ""
 
-		// 过滤 Positions，只保留当前 symbol 的持仓
 		symInput.Positions = filterPositions(input.Positions, []string{sym})
 		partial, err := e.decideSingle(ctx, symInput, delay)
 		if err != nil {
@@ -131,7 +129,7 @@ func (e *LegacyEngineAdapter) Decide(ctx context.Context, input Context) (Decisi
 	result.SymbolResults = blocks
 	result.MetaBreakdown = mergedBreakdown
 	if len(blocks) == 1 {
-		// 回退到旧行为，避免前端解析差异
+
 		result.RawOutput = blocks[0].RawOutput
 		result.RawJSON = blocks[0].RawJSON
 		result.MetaSummary = blocks[0].MetaSummary
@@ -142,6 +140,17 @@ func (e *LegacyEngineAdapter) Decide(ctx context.Context, input Context) (Decisi
 	return result, nil
 }
 
+// decideSingle executes the decision pipeline for a single symbol context.
+//
+// Pipeline:
+// 1. Run Multi-Agents (if enabled) to generate intermediate insights (Pattern, Trend, etc).
+// 2. Compose Prompts: Merge system templates + user context + agent insights.
+// 3. Collect Vision Payloads: If chart images are available in analysis.
+// 4. Call LLMs (Parallel): Invoke all configured providers.
+//   - Resolves model-specific system prompts dynamically.
+//
+// 5. Aggregate: Combine outputs using the configured strategy (FirstWins or MetaVoting).
+// 6. Trace: Log full decision trace for debugging/audit.
 func (e *LegacyEngineAdapter) decideSingle(ctx context.Context, input Context, applyDelay bool) (DecisionResult, error) {
 	insights := e.runMultiAgents(ctx, input)
 	baseSys, usr := e.ComposePrompts(ctx, input, insights)
@@ -237,7 +246,6 @@ func (e *LegacyEngineAdapter) logModelTables(outs []ModelOutput) {
 	logger.InfoBlock(tResults)
 }
 
-// ComposePrompts 返回当前配置下的 System/User 提示词。
 func (e *LegacyEngineAdapter) ComposePrompts(ctx context.Context, input Context, insights []AgentInsight) (string, string) {
 	system := strings.TrimSpace(input.Prompt.System)
 	userSummary := strings.TrimSpace(e.buildUserSummary(ctx, input, insights))
@@ -266,7 +274,6 @@ func (e *LegacyEngineAdapter) loadTemplate(name string) string {
 	return ""
 }
 
-// buildUserSummary 将候选币种与当前仓位的摘要组装为 User 提示词
 func (e *LegacyEngineAdapter) buildUserSummary(ctx context.Context, input Context, insights []AgentInsight) string {
 	e.refreshDerivativesOnDemand(ctx, input.Candidates, input.Directives)
 	sections := render.Sections{
@@ -340,6 +347,18 @@ func (e *LegacyEngineAdapter) collectVisionPayloads(ctxs []AnalysisContext) []pr
 	return out
 }
 
+// callProvider invokes a single LLM provider and parses its output.
+//
+// Logic:
+// 1. Prepares context with timeout.
+// 2. Checks if provider supports Vision (images) and attaches if so.
+// 3. Invokes API (p.Call).
+// 4. Attempts to extract and parse JSON from the raw text response.
+//   - Uses aggressive JSON extraction (ExtractJSON) to handle Markdown code blocks.
+//   - Validates schema (CoerceDecisionArrayJSON, ValidateDecisionArray).
+//   - Validates business logic (validateExitPlans).
+//
+// Returns a ModelOutput containing both raw response and parsed structure.
 func (e *LegacyEngineAdapter) callProvider(parent context.Context, p provider.ModelProvider, system, user string, baseImages []provider.ImagePayload) ModelOutput {
 	cctx := parent
 	var cancel context.CancelFunc
@@ -406,6 +425,8 @@ func (e *LegacyEngineAdapter) callProvider(parent context.Context, p provider.Mo
 	}
 	return ModelOutput{
 		ProviderID:    p.ID(),
+		SystemPrompt:  payload.System,
+		UserPrompt:    payload.User,
 		Raw:           raw,
 		Parsed:        parsed,
 		Err:           err,
@@ -568,7 +589,6 @@ func mergeSymbolSummaries(blocks []SymbolDecisionOutput) string {
 	return strings.Join(parts, "\n\n")
 }
 
-// CloneSlice performs a shallow copy of a slice using Go generics.
 func CloneSlice[T any](src []T) []T {
 	if len(src) == 0 {
 		return nil
@@ -578,7 +598,6 @@ func CloneSlice[T any](src []T) []T {
 	return dst
 }
 
-// cloneOutputs performs a deep copy of ModelOutput slices, ensuring ImagePayloads are also copied.
 func cloneOutputs(src []ModelOutput) []ModelOutput {
 	if len(src) == 0 {
 		return nil
@@ -593,7 +612,6 @@ func cloneOutputs(src []ModelOutput) []ModelOutput {
 	return dst
 }
 
-// filterProfilePrompts 过滤 ProfilePrompts，只保留指定 symbol 的配置
 func filterProfilePrompts(prompts map[string]ProfilePromptSpec, targetSymbol string) map[string]ProfilePromptSpec {
 	if len(prompts) == 0 {
 		return nil
@@ -643,7 +661,6 @@ func resolveSystemPromptForFinalModel(prompts map[string]ProfilePromptSpec, cand
 	return "", fmt.Errorf("未找到 symbol=%s 对应的 profile prompts", symbol)
 }
 
-// filterPositions 过滤持仓列表，只保留 candidates 中包含的 symbol
 func filterPositions(positions []types.PositionSnapshot, candidates []string) []types.PositionSnapshot {
 	if len(positions) == 0 || len(candidates) == 0 {
 		return nil

@@ -94,3 +94,6 @@ start:
 	sleep 3;
 	@echo "启动 brale..."
 	$(DOCKER_COMPOSE) up -d brale
+
+bs:
+	$(DOCKER_COMPOSE) up --build

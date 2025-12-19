@@ -31,7 +31,7 @@ type TrendCompressOptions struct {
 
 func DefaultTrendCompressOptions() TrendCompressOptions {
 	return TrendCompressOptions{
-		FractalSpan:         2, // 5-bar fractal
+		FractalSpan:         2,
 		MaxStructurePoints:  8,
 		DedupDistanceBars:   10,
 		DedupATRFactor:      0.5,
@@ -64,7 +64,7 @@ type TrendCompressedMeta struct {
 
 type TrendStructurePoint struct {
 	Idx   int      `json:"idx"`
-	Type  string   `json:"type"` // "High" | "Low"
+	Type  string   `json:"type"`
 	Price float64  `json:"price"`
 	RSI   *float64 `json:"rsi,omitempty"`
 }
@@ -292,11 +292,12 @@ func mergeStructurePoint(existing []TrendStructurePoint, candidate TrendStructur
 		if math.Abs(other.Price-candidate.Price) >= threshold {
 			continue
 		}
-		if candidate.Type == "High" {
+		switch candidate.Type {
+		case "High":
 			if candidate.Price > other.Price {
 				existing[i] = candidate
 			}
-		} else if candidate.Type == "Low" {
+		case "Low":
 			if candidate.Price < other.Price {
 				existing[i] = candidate
 			}

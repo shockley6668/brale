@@ -7,32 +7,29 @@ import (
 	storemodel "brale/internal/store/model"
 )
 
-// LivePositionStore 描述仓位/tiers 的持久化能力。
 type LivePositionStore interface {
 	UpsertLiveOrder(ctx context.Context, rec LiveOrderRecord) error
 	UpdateOrderStatus(ctx context.Context, tradeID int, status LiveOrderStatus) error
-	// UpsertLiveTiers removed: In-Memory Projection pattern used instead.
-	SavePosition(ctx context.Context, order LiveOrderRecord) error // Removed tier arg
+
+	SavePosition(ctx context.Context, order LiveOrderRecord) error
 	InsertStrategyInstances(ctx context.Context, recs []StrategyInstanceRecord) error
 	UpdateStrategyInstanceState(ctx context.Context, tradeID int, planID, planComponent, stateJSON string, status StrategyStatus) error
 	ListStrategyInstances(ctx context.Context, tradeID int) ([]StrategyInstanceRecord, error)
 	AppendTradeOperation(ctx context.Context, op TradeOperationRecord) error
 	ListTradeOperations(ctx context.Context, freqtradeID int, limit int) ([]TradeOperationRecord, error)
-	GetLivePosition(ctx context.Context, freqtradeID int) (LiveOrderRecord, bool, error) // Removed tier return
-	ListActivePositions(ctx context.Context, limit int) ([]LiveOrderRecord, error)       // Changed return type
-	ListRecentPositions(ctx context.Context, limit int) ([]LiveOrderRecord, error)       // Changed return type
+	GetLivePosition(ctx context.Context, freqtradeID int) (LiveOrderRecord, bool, error)
+	ListActivePositions(ctx context.Context, limit int) ([]LiveOrderRecord, error)
+	ListRecentPositions(ctx context.Context, limit int) ([]LiveOrderRecord, error)
 	ListRecentPositionsPaged(ctx context.Context, symbol string, limit int, offset int) ([]LiveOrderRecord, error)
 	CountRecentPositions(ctx context.Context, symbol string) (int, error)
 	AddOrderPnLColumns() error
 	FinalizeStrategies(ctx context.Context, tradeID int) error
 	FinalizePendingStrategies(ctx context.Context, tradeID int) error
 
-	// Event Sourcing
 	AppendEvent(ctx context.Context, evt EventRecord) error
 	LoadEvents(ctx context.Context, since time.Time, limit int) ([]EventRecord, error)
 }
 
-// LiveOrderStatus 对应 live_orders.status。
 type LiveOrderStatus = storemodel.LiveOrderStatus
 
 const (
@@ -47,7 +44,6 @@ const (
 	LiveOrderStatusCanceled       LiveOrderStatus = storemodel.LiveOrderStatusCanceled
 )
 
-// LiveOrderRecord 表示 live_orders 数据。
 type LiveOrderRecord struct {
 	FreqtradeID        int
 	Symbol             string
@@ -78,7 +74,6 @@ type LiveOrderRecord struct {
 	LastStatusSync     *time.Time
 }
 
-// OperationType 对应 trade_operation_log.operation。
 type OperationType int
 
 const (
@@ -92,7 +87,6 @@ const (
 	OperationForceExit  OperationType = 11
 )
 
-// TradeOperationRecord 表示一次仓位操作流水。
 type TradeOperationRecord struct {
 	FreqtradeID int
 	Symbol      string
@@ -101,7 +95,6 @@ type TradeOperationRecord struct {
 	Timestamp   time.Time
 }
 
-// EventRecord represents a persisted domain event.
 type EventRecord struct {
 	ID        string
 	Type      string

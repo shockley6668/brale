@@ -10,9 +10,6 @@ import (
 	"time"
 )
 
-// 中文说明：
-// Telegram 通知器：在开仓决策触发时，将关键信息推送至指定群/频道。
-
 type Telegram struct {
 	BotToken string
 	ChatID   string
@@ -40,7 +37,6 @@ func (t *Telegram) sendMessage(payload map[string]any) (int, string, error) {
 	return resp.StatusCode, strings.TrimSpace(string(respBody)), nil
 }
 
-// SendText 发送文本消息（带最多 3 次重试）
 func (t *Telegram) SendText(text string) error {
 	if t.BotToken == "" || t.ChatID == "" {
 		return fmt.Errorf("Telegram 配置不完整")
@@ -63,7 +59,6 @@ func (t *Telegram) SendText(text string) error {
 			return nil
 		}
 
-		// Telegram Markdown is fragile; fall back to plain text when entity parsing fails.
 		if status == http.StatusBadRequest && strings.Contains(desc, "can't parse entities") {
 			fallback := map[string]any{
 				"chat_id": t.ChatID,
@@ -92,7 +87,6 @@ func (t *Telegram) SendText(text string) error {
 	return lastErr
 }
 
-// SendStructured 根据结构化消息渲染并发送 Markdown。
 func (t *Telegram) SendStructured(msg StructuredMessage) error {
 	return t.SendText(msg.RenderMarkdown())
 }

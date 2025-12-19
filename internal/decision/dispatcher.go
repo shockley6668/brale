@@ -13,7 +13,6 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// Dispatcher manages model invocations, handling timeouts and parallelism.
 type Dispatcher struct {
 	Providers          []provider.ModelProvider
 	Parallel           bool
@@ -22,12 +21,11 @@ type Dispatcher struct {
 	FinalDisabled      map[string]bool
 }
 
-// NewDispatcher creates a new model dispatcher.
 func NewDispatcher(providers []provider.ModelProvider) *Dispatcher {
 	return &Dispatcher{
 		Providers:      providers,
-		Parallel:       true, // Default
-		TimeoutSeconds: 120,  // Default safely
+		Parallel:       true,
+		TimeoutSeconds: 120,
 	}
 }
 
@@ -47,7 +45,6 @@ func (d *Dispatcher) SetDisabled(disabled map[string]bool) {
 	d.FinalDisabled = disabled
 }
 
-// Dispatch sends prompts to available models and collects outputs.
 func (d *Dispatcher) Dispatch(ctx context.Context, system, user string, images []provider.ImagePayload) []ModelOutput {
 	outs := d.collectOutputs(ctx, func(c context.Context, p provider.ModelProvider) ModelOutput {
 		return d.callProvider(c, p, system, user, images)
@@ -137,11 +134,10 @@ func (d *Dispatcher) callProvider(parent context.Context, p provider.ModelProvid
 		logger.Warnf("模型 %s 调用失败 elapsed=%s err=%v", p.ID(), time.Since(start).Truncate(time.Millisecond), err)
 	}
 
-	// Note: Parsing is handled by Parser component, not here.
-	// We return raw output.
-
 	return ModelOutput{
 		ProviderID:    p.ID(),
+		SystemPrompt:  payload.System,
+		UserPrompt:    payload.User,
 		Raw:           raw,
 		Err:           err,
 		Images:        cloneImages(payload.Images),
@@ -173,8 +169,6 @@ func (d *Dispatcher) isDisabled(id string) bool {
 	_, ok := d.FinalDisabled[strings.TrimSpace(id)]
 	return ok
 }
-
-// Helpers
 
 func cloneImages(src []provider.ImagePayload) []provider.ImagePayload {
 	if len(src) == 0 {

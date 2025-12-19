@@ -14,14 +14,12 @@ import (
 	"github.com/spf13/viper"
 )
 
-// ProfileDefinition 描述单个分析 Profile，在 V2 中用于绑定中间件链与 Prompt。
 type ProfileDefinition struct {
 	Name       string   `mapstructure:"-"`
 	ContextTag string   `mapstructure:"context_tag"`
 	Targets    []string `mapstructure:"targets"`
 	Intervals  []string `mapstructure:"intervals"`
-	// DecisionIntervalMultiple 表示该 profile(币种) 决策间隔 = 最短K线周期 * 倍数。
-	// 默认 1。
+
 	DecisionIntervalMultiple int                `mapstructure:"decision_interval_multiple"`
 	AnalysisSlice            int                `mapstructure:"analysis_slice"`
 	SliceDropTail            int                `mapstructure:"slice_drop_tail"`
@@ -31,7 +29,6 @@ type ProfileDefinition struct {
 	Derivatives              DerivativesConfig  `mapstructure:"derivatives"`
 	Default                  bool               `mapstructure:"default"`
 
-	// 归一化后的字段（避免运行期重复处理）
 	targetsUpper   []string
 	intervalsLower []string
 }
@@ -40,19 +37,15 @@ func (d ProfileDefinition) ExitPlanCombos() []string {
 	return d.ExitPlans.ComboKeys()
 }
 
-// PromptRefs 指定 system/user 模板路径。
 type PromptRefs struct {
-	// SystemByModel 指定每个最终决策模型所使用的 system prompt。
-	// Key 必须精确匹配 ai.models[].id。
 	SystemByModel map[string]string `mapstructure:"system_by_model"`
 	User          string            `mapstructure:"user"`
 }
 
 const defaultExitPlanID = "plan_combo_main"
 
-// ExitPlanBinding 描述 Profile 使用的出场计划组合（Plan ID 固定为内置值）。
 type ExitPlanBinding struct {
-	Allowed []string `mapstructure:"-"` // 固定使用内置 plan，用户不可配置
+	Allowed []string `mapstructure:"-"`
 	Combos  []string `mapstructure:"combos"`
 
 	allowedNormalized []string
@@ -60,7 +53,7 @@ type ExitPlanBinding struct {
 }
 
 func (b *ExitPlanBinding) normalize() {
-	// 不暴露给用户配置，固定为内置 plan。
+
 	b.allowedNormalized = []string{defaultExitPlanID}
 	b.combosNormalized = normalizeComboKeys(b.Combos)
 	b.Allowed = append([]string(nil), b.allowedNormalized...)
@@ -76,7 +69,6 @@ func (b ExitPlanBinding) ComboKeys() []string {
 	return out
 }
 
-// DerivativesConfig 控制是否拉取衍生品指标。
 type DerivativesConfig struct {
 	Enabled        bool `mapstructure:"enabled"`
 	IncludeOI      bool `mapstructure:"include_oi"`
@@ -92,14 +84,13 @@ func (d *DerivativesConfig) normalize() {
 		d.IncludeFunding = false
 		return
 	}
-	// 若未显式指定，默认同时注入 OI/Funding。
+
 	if !d.IncludeOI && !d.IncludeFunding {
 		d.IncludeOI = true
 		d.IncludeFunding = true
 	}
 }
 
-// MiddlewareConfig 为单个中间件节点的配置。
 type MiddlewareConfig struct {
 	Name           string                            `mapstructure:"name"`
 	Stage          int                               `mapstructure:"stage"`
@@ -109,22 +100,18 @@ type MiddlewareConfig struct {
 	Configs        map[string]map[string]interface{} `mapstructure:"configs"`
 }
 
-// FileConfig 是完整的 profile 配置文件结构。
 type FileConfig struct {
 	Profiles map[string]ProfileDefinition `mapstructure:"profiles"`
 }
 
-// ProfileSnapshot 对外暴露的只读快照。
 type ProfileSnapshot struct {
 	Version  int64
 	LoadedAt time.Time
 	Profiles map[string]ProfileDefinition
 }
 
-// ChangeListener 在配置变更时被调用。
 type ChangeListener func(ProfileSnapshot)
 
-// ProfileLoader 负责从 YAML/JSON 文件中加载 profile，并监听热更新。
 type ProfileLoader struct {
 	path string
 	v    *viper.Viper
@@ -134,7 +121,6 @@ type ProfileLoader struct {
 	listeners []ChangeListener
 }
 
-// NewProfileLoader 读取配置文件并开始监听 FS 事件。
 func NewProfileLoader(path string) (*ProfileLoader, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, fmt.Errorf("profile loader requires path")
@@ -159,14 +145,12 @@ func NewProfileLoader(path string) (*ProfileLoader, error) {
 	return loader, nil
 }
 
-// Snapshot 返回当前配置快照（深拷贝）。
 func (l *ProfileLoader) Snapshot() ProfileSnapshot {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return cloneSnapshot(l.snapshot)
 }
 
-// Subscribe 注册监听器，并立即收到一次完整快照。
 func (l *ProfileLoader) Subscribe(fn ChangeListener) {
 	if fn == nil {
 		return
@@ -264,27 +248,6 @@ func normalizeSymbols(in []string) []string {
 	return out
 }
 
-func normalizePlanIDs(in []string) []string {
-	if len(in) == 0 {
-		return nil
-	}
-	seen := make(map[string]struct{})
-	out := make([]string, 0, len(in))
-	for _, id := range in {
-		norm := strings.TrimSpace(id)
-		if norm == "" {
-			continue
-		}
-		key := strings.ToLower(norm)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		out = append(out, norm)
-	}
-	return out
-}
-
 func normalizeComboKeys(in []string) []string {
 	if len(in) == 0 {
 		return nil
@@ -354,12 +317,12 @@ func expandSingleMiddlewareConfig(cfg MiddlewareConfig) []MiddlewareConfig {
 	out := make([]MiddlewareConfig, 0, len(keys))
 	for _, k := range keys {
 		spec := cfg.Configs[k]
-		// Start with parent params
+
 		params := cloneParams(cfg.Params)
 		if params == nil {
 			params = make(map[string]interface{})
 		}
-		// Merge specific params, child params override parent params
+
 		for pk, pv := range spec {
 			params[pk] = pv
 		}
@@ -388,21 +351,18 @@ func cloneParams(src map[string]interface{}) map[string]interface{} {
 	return out
 }
 
-// TargetsUpper 返回标准化后的交易对列表。
 func (p ProfileDefinition) TargetsUpper() []string {
 	out := make([]string, len(p.targetsUpper))
 	copy(out, p.targetsUpper)
 	return out
 }
 
-// IntervalsLower 返回标准化后的周期列表。
 func (p ProfileDefinition) IntervalsLower() []string {
 	out := make([]string, len(p.intervalsLower))
 	copy(out, p.intervalsLower)
 	return out
 }
 
-// AgentEnabled 当 profile 配置了 EMA/RSI/MACD 中间件中任意一个时，视为启用多 Agent。
 func (p ProfileDefinition) AgentEnabled() bool {
 	for _, mw := range p.Middlewares {
 		if isAgentMiddleware(mw.Name) {
@@ -412,7 +372,6 @@ func (p ProfileDefinition) AgentEnabled() bool {
 	return false
 }
 
-// DerivativesEnabled 返回该 profile 是否允许注入衍生品数据。
 func (p ProfileDefinition) DerivativesEnabled() bool {
 	return p.Derivatives.Enabled && (p.Derivatives.IncludeOI || p.Derivatives.IncludeFunding)
 }

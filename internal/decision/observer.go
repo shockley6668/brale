@@ -2,21 +2,23 @@ package decision
 
 import "context"
 
-// DecisionObserver 在每次模型聚合后回调，便于外部记录输入/输出。
+// DecisionObserver receives decision results for logging/notification.
+// Called after each decision cycle with full trace data.
 type DecisionObserver interface {
 	AfterDecide(ctx context.Context, trace DecisionTrace)
 }
 
-// DecisionTrace 描述一次完整调用的材料与结果。
+// DecisionTrace captures everything about a decision for debugging.
+// Stored in decision_logs table, displayed in admin dashboard.
 type DecisionTrace struct {
 	TraceID       string
 	SystemPrompt  string
 	UserPrompt    string
-	Outputs       []ModelOutput
-	Best          ModelOutput
-	Candidates    []string
-	Timeframes    []string
-	HorizonName   string
+	Outputs       []ModelOutput // All provider responses (for comparison)
+	Best          ModelOutput   // Final aggregated result
+	Candidates    []string      // Symbols analyzed
+	Timeframes    []string      // Kline intervals used
+	HorizonName   string        // Active profile group
 	Positions     []PositionSnapshot
-	AgentInsights []AgentInsight
+	AgentInsights []AgentInsight // Multi-agent intermediate reasoning
 }

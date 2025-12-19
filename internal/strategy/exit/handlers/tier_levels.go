@@ -19,7 +19,6 @@ const (
 	minTierDeltaPct = 0.002
 )
 
-// RegisterCoreHandlers 将内建 handler 注册到 registry。
 func RegisterCoreHandlers(reg *exit.HandlerRegistry) {
 	if reg == nil {
 		return
@@ -214,7 +213,7 @@ func (h *tierLevelsHandler) OnAdjust(ctx context.Context, inst exit.PlanInstance
 		state.TargetPrice = price
 		changes["target_price"] = price
 	} else if pct, ok := number(params["target"]); ok && pct > 0 {
-		// 兼容旧格式：按 entry price 转换为绝对价。
+
 		state.TargetPrice = state.EntryPrice * (1 + pct)
 		changes["target_price"] = state.TargetPrice
 	}
@@ -302,7 +301,7 @@ func (h *tierLevelsHandler) validateTargets(entry float64, side string, tiers []
 				return fmt.Errorf("tier#%d 必须严格递减", idx+1)
 			}
 		} else {
-			// 第一段相对 entry 的方向也需符合预期
+
 			if expectAsc && diff <= 0 {
 				return fmt.Errorf("tier#%d 需高于开仓价 %.4f", idx+1, entry)
 			}

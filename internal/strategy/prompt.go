@@ -7,15 +7,13 @@ import (
 	"strings"
 )
 
-// Manager 负责从目录中加载 .txt 提示词模板
 type Manager struct {
 	dir   string
-	cache map[string]string // name -> content
+	cache map[string]string
 }
 
 func NewManager(dir string) *Manager { return &Manager{dir: dir, cache: make(map[string]string)} }
 
-// Load 扫描目录并读取所有 .txt 文件
 func (m *Manager) Load() error {
 	entries, err := os.ReadDir(m.dir)
 	if err != nil {
@@ -40,13 +38,10 @@ func (m *Manager) Load() error {
 	return nil
 }
 
-// Reload 重新加载
 func (m *Manager) Reload() error { return m.Load() }
 
-// Get 获取模板内容
 func (m *Manager) Get(name string) (string, bool) { v, ok := m.cache[name]; return v, ok }
 
-// List 返回所有加载的模板名称和内容
 func (m *Manager) List() map[string]string {
 	out := make(map[string]string, len(m.cache))
 	for k, v := range m.cache {
@@ -55,7 +50,6 @@ func (m *Manager) List() map[string]string {
 	return out
 }
 
-// MustWriteSample 写入一个 default.txt（用于测试/示例）
 func MustWriteSample(dir string) error {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err

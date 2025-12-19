@@ -14,8 +14,6 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// Multi-Agent execution functions extracted from legacy_adapter.go
-
 type agentStageConfig struct {
 	name       string
 	tplName    string

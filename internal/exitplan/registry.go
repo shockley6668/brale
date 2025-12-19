@@ -20,7 +20,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Template 描述单个退出计划模板。
 type Template struct {
 	ID          string                 `mapstructure:"id" yaml:"id"`
 	Description string                 `mapstructure:"description" yaml:"description"`
@@ -32,22 +31,18 @@ type Template struct {
 	schemaCompiled *jsonschema.Schema
 }
 
-// FileConfig 映射 exit_plans。
 type FileConfig struct {
 	ExitPlans map[string]Template `mapstructure:"exit_plans" yaml:"exit_plans"`
 }
 
-// Snapshot 公开的模板快照。
 type Snapshot struct {
 	Version   int64
 	LoadedAt  time.Time
 	Templates map[string]Template
 }
 
-// ChangeListener 在 registry 重载时触发。
 type ChangeListener func(Snapshot)
 
-// Registry 管理 exit plan 模板。
 type Registry struct {
 	path string
 	v    *viper.Viper
@@ -57,7 +52,6 @@ type Registry struct {
 	listeners []ChangeListener
 }
 
-// NewRegistry 读取配置文件并监听更新。
 func NewRegistry(path string) (*Registry, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, fmt.Errorf("exit plan registry requires path")
@@ -82,14 +76,12 @@ func NewRegistry(path string) (*Registry, error) {
 	return r, nil
 }
 
-// Snapshot 返回当前模板集。
 func (r *Registry) Snapshot() Snapshot {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return cloneSnapshot(r.snapshot)
 }
 
-// Template 返回指定 ID 的模板。
 func (r *Registry) Template(id string) (Template, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -97,7 +89,6 @@ func (r *Registry) Template(id string) (Template, bool) {
 	return tpl, ok
 }
 
-// AllowedSchema 根据 ID 列表渲染提示片段。
 func (r *Registry) AllowedSchema(ids []string) string {
 	if len(ids) == 0 {
 		return ""
@@ -245,7 +236,6 @@ func (t Template) Validate(params map[string]any) error {
 	return t.schemaCompiled.Validate(sanitized)
 }
 
-// sanitizeParams 递归遍历 params，将字符串形式的数字转为 float64，以兼容 LLM 有时返回 "3000" 而非 3000 的情况。
 func sanitizeParams(v any) any {
 	switch val := v.(type) {
 	case map[string]any:
@@ -261,7 +251,7 @@ func sanitizeParams(v any) any {
 		}
 		return out
 	case string:
-		// 尝试转换为数字
+
 		s := strings.TrimSpace(val)
 		if s == "" {
 			return val
@@ -275,7 +265,6 @@ func sanitizeParams(v any) any {
 	}
 }
 
-// Validate 调用模板校验指定 plan。
 func (r *Registry) Validate(planID string, params map[string]any) (Template, error) {
 	tpl, ok := r.Template(planID)
 	if !ok {
@@ -287,7 +276,6 @@ func (r *Registry) Validate(planID string, params map[string]any) (Template, err
 	return tpl, nil
 }
 
-// MergeAllowedSchemas 合并 profile 中配置的所有计划 ID。
 func MergeAllowedSchemas(profilePlans [][]string) []string {
 	uniq := make(map[string]struct{})
 	for _, plans := range profilePlans {
@@ -310,7 +298,6 @@ func MergeAllowedSchemas(profilePlans [][]string) []string {
 	return out
 }
 
-// PlanAllowed checks if a plan ID is in the allowed list (case-insensitive).
 func PlanAllowed(target string, allowed []string) bool {
 	target = strings.TrimSpace(target)
 	if target == "" || len(allowed) == 0 {

@@ -13,7 +13,6 @@ import (
 	talib "github.com/markcheno/go-talib"
 )
 
-// EMATrendConfig 控制 EMA 计算参数。
 type EMATrendConfig struct {
 	Name     string
 	Stage    int
@@ -25,7 +24,6 @@ type EMATrendConfig struct {
 	Slow     int
 }
 
-// EMATrendMiddleware 输出 EMA 排列与趋势说明。
 type EMATrendMiddleware struct {
 	meta     pipeline.MiddlewareMeta
 	interval string
@@ -34,7 +32,6 @@ type EMATrendMiddleware struct {
 	slow     int
 }
 
-// NewEMATrend 构造 EMA 中间件。
 func NewEMATrend(cfg EMATrendConfig) *EMATrendMiddleware {
 	return &EMATrendMiddleware{
 		meta: pipeline.MiddlewareMeta{
@@ -50,7 +47,6 @@ func NewEMATrend(cfg EMATrendConfig) *EMATrendMiddleware {
 	}
 }
 
-// GetConfig returns the EMATrendConfig of the middleware.
 func (m *EMATrendMiddleware) GetConfig() EMATrendConfig {
 	return EMATrendConfig{
 		Name:     m.meta.Name,
@@ -64,10 +60,8 @@ func (m *EMATrendMiddleware) GetConfig() EMATrendConfig {
 	}
 }
 
-// Meta 实现接口。
 func (m *EMATrendMiddleware) Meta() pipeline.MiddlewareMeta { return m.meta }
 
-// Handle 计算 EMA。
 func (m *EMATrendMiddleware) Handle(ctx context.Context, ac *pipeline.AnalysisContext) error {
 	interval := m.interval
 	if interval == "" {
@@ -107,6 +101,7 @@ func (m *EMATrendMiddleware) Handle(ctx context.Context, ac *pipeline.AnalysisCo
 			"spread_fast_mid": spreadFastMid,
 			"spread_mid_slow": spreadMidSlow,
 			"trend":           trend,
+			"trend_label":     trendLabel,
 			"pivots":          emaPivots(candles, m.fast, m.mid, m.slow),
 		},
 	})
@@ -123,14 +118,7 @@ func emaPivots(candles []market.Candle, fastPeriod, midPeriod, slowPeriod int) [
 	if len(candles) == 0 {
 		return nil
 	}
-	maxPeriod := slowPeriod
-	if fastPeriod > maxPeriod {
-		maxPeriod = fastPeriod
-	}
-	if midPeriod > maxPeriod {
-		maxPeriod = midPeriod
-	}
-	if maxPeriod <= 0 || len(candles) < maxPeriod {
+	if !sufficientEmaHistory(candles, fastPeriod, midPeriod, slowPeriod) {
 		return nil
 	}
 	closes := closes(candles)
@@ -138,37 +126,67 @@ func emaPivots(candles []market.Candle, fastPeriod, midPeriod, slowPeriod int) [
 	midArr := talib.Ema(closes, midPeriod)
 	slowArr := talib.Ema(closes, slowPeriod)
 	pivots := make([]emaPivot, 0, 4)
-	addPivot := func(label string, idx int, val float64) {
-		if idx < 0 || idx >= len(candles) {
-			return
-		}
-		ts := candles[idx].CloseTime
-		if ts == 0 {
-			ts = candles[idx].OpenTime
-		}
-		pivots = append(pivots, emaPivot{
-			Type: label,
-			Time: time.UnixMilli(ts).UTC().Format(time.RFC3339),
-			Val:  val,
-		})
-	}
-	if len(fastArr) >= len(candles) {
-		for i := len(fastArr) - 1; i > 1 && len(pivots) < 8; i-- {
-			cur := fastArr[i] - midArr[i]
-			prev := fastArr[i-1] - midArr[i-1]
-			if (cur >= 0 && prev < 0) || (cur <= 0 && prev > 0) {
-				addPivot("fast-mid crossover", len(candles)-(len(fastArr)-i), fastArr[i])
-			}
-		}
-	}
-	if len(midArr) >= len(candles) {
-		for i := len(midArr) - 1; i > 1 && len(pivots) < 12; i-- {
-			cur := midArr[i] - slowArr[i]
-			prev := midArr[i-1] - slowArr[i-1]
-			if (cur >= 0 && prev < 0) || (cur <= 0 && prev > 0) {
-				addPivot("mid-slow crossover", len(candles)-(len(midArr)-i), midArr[i])
-			}
-		}
-	}
+
+	// We cap pivot count to avoid flooding the prompt (fast-mid up to 8; mid-slow up to 12).
+	appendFastMidPivots(candles, fastArr, midArr, &pivots)
+	appendMidSlowPivots(candles, midArr, slowArr, &pivots)
 	return pivots
+}
+
+func sufficientEmaHistory(candles []market.Candle, fastPeriod, midPeriod, slowPeriod int) bool {
+	maxPeriod := max3(fastPeriod, midPeriod, slowPeriod)
+	return maxPeriod > 0 && len(candles) >= maxPeriod
+}
+
+func max3(a, b, c int) int {
+	if a < b {
+		a = b
+	}
+	if a < c {
+		return c
+	}
+	return a
+}
+
+func appendFastMidPivots(candles []market.Candle, fastArr, midArr []float64, pivots *[]emaPivot) {
+	if len(fastArr) < len(candles) || pivots == nil {
+		return
+	}
+	for i := len(fastArr) - 1; i > 1 && len(*pivots) < 8; i-- {
+		cur := fastArr[i] - midArr[i]
+		prev := fastArr[i-1] - midArr[i-1]
+		if (cur >= 0 && prev < 0) || (cur <= 0 && prev > 0) {
+			appendPivot(candles, i, "fast-mid crossover", fastArr[i], pivots)
+		}
+	}
+}
+
+func appendMidSlowPivots(candles []market.Candle, midArr, slowArr []float64, pivots *[]emaPivot) {
+	if len(midArr) < len(candles) || pivots == nil {
+		return
+	}
+	for i := len(midArr) - 1; i > 1 && len(*pivots) < 12; i-- {
+		cur := midArr[i] - slowArr[i]
+		prev := midArr[i-1] - slowArr[i-1]
+		if (cur >= 0 && prev < 0) || (cur <= 0 && prev > 0) {
+			appendPivot(candles, i, "mid-slow crossover", midArr[i], pivots)
+		}
+	}
+}
+
+// appendPivot converts candle index into timestamped pivot entry.
+// Example: if fast crosses mid at idx=10, we emit {"type": "fast-mid crossover", "time": <candle[10] time>, "value": fast[10]}.
+func appendPivot(candles []market.Candle, idx int, label string, val float64, pivots *[]emaPivot) {
+	if pivots == nil || idx < 0 || idx >= len(candles) {
+		return
+	}
+	ts := candles[idx].CloseTime
+	if ts == 0 {
+		ts = candles[idx].OpenTime
+	}
+	*pivots = append(*pivots, emaPivot{
+		Type: label,
+		Time: time.UnixMilli(ts).UTC().Format(time.RFC3339),
+		Val:  val,
+	})
 }

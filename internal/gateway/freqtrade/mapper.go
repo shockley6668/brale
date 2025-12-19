@@ -8,7 +8,6 @@ import (
 	"brale/internal/store/model"
 )
 
-// deref safely dereferences a pointer, returning zero value if nil.
 func deref[T any](ptr *T) T {
 	if ptr == nil {
 		var zero T
@@ -17,19 +16,17 @@ func deref[T any](ptr *T) T {
 	return *ptr
 }
 
-// normalizeUnixMillis converts legacy unix-second timestamps into unix-millis.
 func normalizeUnixMillis(ts int64) int64 {
 	if ts <= 0 {
 		return 0
 	}
-	// unix millis for 2001-09-09 is ~1e12; anything below is very likely seconds.
+
 	if ts < 1_000_000_000_000 {
 		return ts * 1000
 	}
 	return ts
 }
 
-// derefUnixMillis returns Unix milliseconds from time pointer, 0 if nil.
 func derefUnixMillis(t *time.Time) int64 {
 	if t == nil {
 		return 0

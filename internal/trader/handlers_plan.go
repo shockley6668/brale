@@ -1,6 +1,5 @@
 package trader
 
-// PlanEventHandler handles EvtPlanEvent events.
 type PlanEventHandler struct{}
 
 func (h *PlanEventHandler) Type() EventType { return EvtPlanEvent }
@@ -9,7 +8,6 @@ func (h *PlanEventHandler) Handle(ctx *HandlerContext, payload []byte, traceID s
 	return ctx.Trader().handlePlanEvent(payload)
 }
 
-// PlanStateUpdateHandler handles EvtPlanStateUpdate events.
 type PlanStateUpdateHandler struct{}
 
 func (h *PlanStateUpdateHandler) Type() EventType { return EvtPlanStateUpdate }
@@ -18,7 +16,6 @@ func (h *PlanStateUpdateHandler) Handle(ctx *HandlerContext, payload []byte, tra
 	return ctx.Trader().handlePlanStateUpdate(payload)
 }
 
-// SyncPlansHandler handles EvtSyncPlans events.
 type SyncPlansHandler struct{}
 
 func (h *SyncPlansHandler) Type() EventType { return EvtSyncPlans }

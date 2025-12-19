@@ -11,22 +11,18 @@ import (
 	storemodel "brale/internal/store/model"
 )
 
-// StrategyStatus 描述 plan 执行状态。
 type StrategyStatus = storemodel.StrategyStatus
 
 const (
-	// Legacy naming (Waiting/Pending/Paused) mapped onto shared statuses.
 	StrategyStatusWaiting StrategyStatus = storemodel.StrategyStatusPending
 	StrategyStatusPending StrategyStatus = storemodel.StrategyStatusActive
 	StrategyStatusDone    StrategyStatus = storemodel.StrategyStatusDone
 	StrategyStatusPaused  StrategyStatus = storemodel.StrategyStatusFailed
 
-	// Direct aliases for shared enums.
 	StrategyStatusActive StrategyStatus = storemodel.StrategyStatusActive
 	StrategyStatusFailed StrategyStatus = storemodel.StrategyStatusFailed
 )
 
-// StrategyInstanceRecord 表示 strategy_instances 的一行。
 type StrategyInstanceRecord struct {
 	ID              int64
 	TradeID         int
@@ -43,7 +39,6 @@ type StrategyInstanceRecord struct {
 	UpdatedAt       time.Time
 }
 
-// StrategyChangeLogRecord 记录 plan 调整日志。
 type StrategyChangeLogRecord struct {
 	TradeID         int
 	InstanceID      int64
@@ -140,7 +135,6 @@ func (s *DecisionLogStore) InsertStrategyChangeLog(ctx context.Context, rec Stra
 	return err
 }
 
-// ListStrategyChangeLogs 返回 plan 的变更记录。
 func (s *DecisionLogStore) ListStrategyChangeLogs(ctx context.Context, tradeID int, limit int) ([]StrategyChangeLogRecord, error) {
 	if s == nil {
 		return nil, fmt.Errorf("decision log store 未初始化")
@@ -324,7 +318,6 @@ func nullString(val string) interface{} {
 	return val
 }
 
-// EncodeParams 将参数 map 编码为 JSON 字符串。
 func EncodeParams(params map[string]any) string {
 	if len(params) == 0 {
 		return "{}"
@@ -336,7 +329,6 @@ func EncodeParams(params map[string]any) string {
 	return string(buf)
 }
 
-// ActiveStrategyTrades 返回存在未完成策略实例的 trade_id 列表。
 func (s *DecisionLogStore) ActiveStrategyTrades(ctx context.Context) ([]int, error) {
 	if s == nil {
 		return nil, fmt.Errorf("decision log store 未初始化")

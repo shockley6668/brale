@@ -8,34 +8,51 @@ import (
 	"brale/internal/gateway/database"
 )
 
-// tradeToLiveRecord converts a Freqtrade Trade to a database LiveOrderRecord.
 func tradeToLiveRecord(tr *Trade) database.LiveOrderRecord {
 	if tr == nil {
 		return database.LiveOrderRecord{}
 	}
 	now := time.Now()
-	// Convert Freqtrade pair (e.g., "ETH/USDT:USDT") to internal symbol (e.g., "ETH/USDT")
+
 	symbol := freqtradePairToSymbol(tr.Pair)
 	isOpen := tr.IsOpen
-	// /trades 历史接口在不同版本 freqtrade 下可能缺少 is_open 字段（默认 false），
-	// 同时部分版本会填充 close_rate（即使尚未平仓）；因此只要 close_date 为空，就视为未平仓兜底。
+
 	if !isOpen {
 		closeDate := strings.TrimSpace(tr.CloseDate)
 		if closeDate == "" {
 			isOpen = true
 		}
 	}
-	rec := database.LiveOrderRecord{
+	rec := initLiveRecord(tr, symbol, now, isOpen)
+	rec = applyAmounts(tr, rec, isOpen)
+	rec = applyPricing(tr, rec)
+	rec = applyTimestamps(tr, rec)
+	rec = applyPnLFields(tr, rec, isOpen)
+
+	rec.LastStatusSync = ptrTime(time.Now())
+	if raw, err := json.Marshal(tr); err == nil {
+		rec.RawData = string(raw)
+	}
+	return rec
+}
+
+// initLiveRecord seeds a record with defaults; status starts open unless already closed.
+func initLiveRecord(tr *Trade, symbol string, now time.Time, isOpen bool) database.LiveOrderRecord {
+	status := database.LiveOrderStatusOpen
+	if !isOpen {
+		status = database.LiveOrderStatusClosed
+	}
+	return database.LiveOrderRecord{
 		FreqtradeID: tr.ID,
 		Symbol:      symbol,
 		Side:        normalizeTradeSide(tr),
-		Status:      database.LiveOrderStatusOpen,
+		Status:      status,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
-	if !isOpen {
-		rec.Status = database.LiveOrderStatusClosed
-	}
+}
+
+func applyAmounts(tr *Trade, rec database.LiveOrderRecord, isOpen bool) database.LiveOrderRecord {
 	if amt := tr.Amount; amt != 0 {
 		rec.Amount = ptrFloat(amt)
 		rec.InitialAmount = ptrFloat(amt)
@@ -49,12 +66,20 @@ func tradeToLiveRecord(tr *Trade) database.LiveOrderRecord {
 	} else if tr.Amount != 0 && tr.OpenRate != 0 {
 		rec.PositionValue = ptrFloat(tr.Amount * tr.OpenRate)
 	}
+	return rec
+}
+
+func applyPricing(tr *Trade, rec database.LiveOrderRecord) database.LiveOrderRecord {
 	if tr.OpenRate != 0 {
 		rec.Price = ptrFloat(tr.OpenRate)
 	}
 	if tr.Leverage != 0 {
 		rec.Leverage = ptrFloat(tr.Leverage)
 	}
+	return rec
+}
+
+func applyTimestamps(tr *Trade, rec database.LiveOrderRecord) database.LiveOrderRecord {
 	if openAt := parseFreqtradeTime(tr.OpenDate); !openAt.IsZero() {
 		rec.StartTime = ptrTime(openAt)
 		rec.CreatedAt = openAt
@@ -66,34 +91,44 @@ func tradeToLiveRecord(tr *Trade) database.LiveOrderRecord {
 			rec.Status = database.LiveOrderStatusClosed
 		}
 	}
+	return rec
+}
+
+func applyPnLFields(tr *Trade, rec database.LiveOrderRecord, isOpen bool) database.LiveOrderRecord {
 	if isOpen {
-		if rate := firstNonZero(tr.CurrentRate, tr.OpenRate); rate != 0 {
-			rec.CurrentPrice = ptrFloat(rate)
-		}
-		if tr.ProfitRatio != 0 {
-			rec.CurrentProfitRatio = ptrFloat(tr.ProfitRatio)
-			rec.UnrealizedPnLRatio = ptrFloat(tr.ProfitRatio)
-		}
-		if tr.ProfitAbs != 0 {
-			rec.CurrentProfitAbs = ptrFloat(tr.ProfitAbs)
-			rec.UnrealizedPnLUSD = ptrFloat(tr.ProfitAbs)
-		}
+		rec = applyOpenPnL(tr, rec)
 	} else {
-		if tr.CloseRate != 0 {
-			rec.CurrentPrice = ptrFloat(tr.CloseRate)
-		}
-		if tr.CloseProfit != 0 {
-			rec.PnLRatio = ptrFloat(tr.CloseProfit)
-			rec.RealizedPnLRatio = ptrFloat(tr.CloseProfit)
-		}
-		if tr.CloseProfitAbs != 0 {
-			rec.PnLUSD = ptrFloat(tr.CloseProfitAbs)
-			rec.RealizedPnLUSD = ptrFloat(tr.CloseProfitAbs)
-		}
+		rec = applyClosedPnL(tr, rec)
 	}
-	rec.LastStatusSync = ptrTime(time.Now())
-	if raw, err := json.Marshal(tr); err == nil {
-		rec.RawData = string(raw)
+	return rec
+}
+
+func applyOpenPnL(tr *Trade, rec database.LiveOrderRecord) database.LiveOrderRecord {
+	if rate := firstNonZero(tr.CurrentRate, tr.OpenRate); rate != 0 {
+		rec.CurrentPrice = ptrFloat(rate)
+	}
+	if tr.ProfitRatio != 0 {
+		rec.CurrentProfitRatio = ptrFloat(tr.ProfitRatio)
+		rec.UnrealizedPnLRatio = ptrFloat(tr.ProfitRatio)
+	}
+	if tr.ProfitAbs != 0 {
+		rec.CurrentProfitAbs = ptrFloat(tr.ProfitAbs)
+		rec.UnrealizedPnLUSD = ptrFloat(tr.ProfitAbs)
+	}
+	return rec
+}
+
+func applyClosedPnL(tr *Trade, rec database.LiveOrderRecord) database.LiveOrderRecord {
+	if tr.CloseRate != 0 {
+		rec.CurrentPrice = ptrFloat(tr.CloseRate)
+	}
+	if tr.CloseProfit != 0 {
+		rec.PnLRatio = ptrFloat(tr.CloseProfit)
+		rec.RealizedPnLRatio = ptrFloat(tr.CloseProfit)
+	}
+	if tr.CloseProfitAbs != 0 {
+		rec.PnLUSD = ptrFloat(tr.CloseProfitAbs)
+		rec.RealizedPnLUSD = ptrFloat(tr.CloseProfitAbs)
 	}
 	return rec
 }

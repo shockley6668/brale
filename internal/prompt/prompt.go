@@ -8,7 +8,6 @@ import (
 	"sync"
 )
 
-// ExitPlanPrompt 描述一种组合策略的提示模板与约束。
 type ExitPlanPrompt struct {
 	Key         string   `json:"key"`
 	Title       string   `json:"title"`
@@ -48,7 +47,6 @@ var (
 	comboPromptMap  map[string]ExitPlanPrompt
 )
 
-// GenerateExitPlanPrompts 穷举常见的分段止盈/止损组合，并生成对应的提示 JSON 与约束。
 func GenerateExitPlanPrompts() []ExitPlanPrompt {
 	index := exitPlanPromptIndex()
 	list := make([]ExitPlanPrompt, 0, len(index))
@@ -59,7 +57,6 @@ func GenerateExitPlanPrompts() []ExitPlanPrompt {
 	return list
 }
 
-// ExitPlanPrompts 返回全部组合模板的只读副本。
 func ExitPlanPrompts() map[string]ExitPlanPrompt {
 	index := exitPlanPromptIndex()
 	if len(index) == 0 {
@@ -72,8 +69,6 @@ func ExitPlanPrompts() map[string]ExitPlanPrompt {
 	return out
 }
 
-// BuildPromptsFromCombos 根据 combo -> planID 的映射生成提示模板。
-// planID 为空时默认使用 plan_combo_main。
 func BuildPromptsFromCombos(comboPlan map[string]string) map[string]ExitPlanPrompt {
 	if len(comboPlan) == 0 {
 		return nil
@@ -98,14 +93,12 @@ func BuildPromptsFromCombos(comboPlan map[string]string) map[string]ExitPlanProm
 	return result
 }
 
-// ExitPlanPromptByKey 返回指定组合模板。
 func ExitPlanPromptByKey(key string) (ExitPlanPrompt, bool) {
 	index := exitPlanPromptIndex()
 	p, ok := index[NormalizeComboKey(key)]
 	return p, ok
 }
 
-// NormalizeComboKey 统一规格化组合 key（trim + lower）。
 func NormalizeComboKey(key string) string {
 	return strings.ToLower(strings.TrimSpace(key))
 }
@@ -133,7 +126,7 @@ func buildComboPrompt(combo comboSpec, planID string) ExitPlanPrompt {
 		},
 	}
 	data, _ := json.MarshalIndent(spec, "", "  ")
-	// 固定组件集：选定组合后 children 组件/handler 不可增删或替换；plan id 固定。
+
 	constraints := aggregateConstraints(combo.Components)
 	constraints = append([]string{
 		`exit_plan.id 必须填 "plan_combo_main"，不得为空或替换其它 ID`,
@@ -166,7 +159,6 @@ func enumerateCombos() []comboSpec {
 		}
 	}
 
-	// 额外的多止盈组合：多阶段止盈 + ATR 锁盈 + 不同止损器
 	for _, sl := range stopLoss {
 		key := fmt.Sprintf("tp_tiers__tp_atr__%s", sl.Key)
 		title := fmt.Sprintf("多阶段止盈 + ATR 锁盈 + %s", sl.DisplayName)
@@ -321,7 +313,7 @@ func buildParams(comp comboComponent) map[string]any {
 		prefix = strings.ToUpper(strings.TrimSpace(comp.Alias))
 	}
 	params := map[string]any{}
-	// 仅 ATR 组件需要 mode，其它组件在 schema 中不允许多余字段
+
 	if comp.Mode != "" && comp.Stage == "atr" {
 		params["mode"] = comp.Mode
 	}
@@ -417,7 +409,6 @@ const fullDecisionTemplate = `[
   }
 ]`
 
-// DecisionConstraint 返回完整的 LLM 约束文本与示例 JSON，包含通用字段说明与特定组合的 exit_plan 限制。
 func DecisionConstraint(key string) (string, string, bool) {
 	prompt, ok := ExitPlanPromptByKey(key)
 	if !ok {

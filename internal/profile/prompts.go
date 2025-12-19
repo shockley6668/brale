@@ -7,24 +7,19 @@ import (
 	"strings"
 )
 
-// TemplateSource 表示一个可以根据名称返回模板内容的源（例如 strategy.Manager）。
 type TemplateSource interface {
 	Get(name string) (string, bool)
 }
 
-// PromptLoader 负责按引用加载提示词内容。
 type PromptLoader interface {
 	Load(ref string) (string, error)
 }
 
-// FilePromptLoader 支持从 TemplateSource 或文件系统中加载提示词。
 type FilePromptLoader struct {
 	source TemplateSource
 	bases  []string
 }
 
-// NewPromptLoader 构造一个 PromptLoader。
-// bases 用于指定附加的相对搜索目录（例如 prompts/）。
 func NewPromptLoader(source TemplateSource, bases ...string) *FilePromptLoader {
 	normalized := make([]string, 0, len(bases))
 	seen := make(map[string]struct{}, len(bases))
@@ -45,7 +40,6 @@ func NewPromptLoader(source TemplateSource, bases ...string) *FilePromptLoader {
 	}
 }
 
-// Load 根据引用返回提示词内容。
 func (l *FilePromptLoader) Load(ref string) (string, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {

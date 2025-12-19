@@ -6,7 +6,6 @@ import (
 	"gorm.io/datatypes"
 )
 
-// LiveOrderStatus represents the status of an order.
 type LiveOrderStatus int
 
 const (
@@ -18,10 +17,9 @@ const (
 	LiveOrderStatusOpening        LiveOrderStatus = 5
 	LiveOrderStatusClosingPartial LiveOrderStatus = 6
 	LiveOrderStatusClosingFull    LiveOrderStatus = 7
-	LiveOrderStatusCanceled       LiveOrderStatus = 8 // Assigned 8 to avoid conflict, check database package if it has Canceled
+	LiveOrderStatusCanceled       LiveOrderStatus = 8
 )
 
-// StrategyStatus represents the status of a strategy instance.
 type StrategyStatus int
 
 const (
@@ -31,7 +29,6 @@ const (
 	StrategyStatusFailed  StrategyStatus = 3
 )
 
-// LiveOrderModel maps to 'live_orders' table.
 type LiveOrderModel struct {
 	ID                int64           `gorm:"column:id;primaryKey"`
 	FreqtradeID       int             `gorm:"column:freqtrade_id;uniqueIndex"`
@@ -62,14 +59,12 @@ type LiveOrderModel struct {
 	CreatedAtUnix     int64           `gorm:"column:created_at"`
 	UpdatedAtUnix     int64           `gorm:"column:updated_at"`
 
-	// Helper fields for GORM hooks or application usage
 	CreatedAt time.Time `gorm:"-"`
 	UpdatedAt time.Time `gorm:"-"`
 }
 
 func (LiveOrderModel) TableName() string { return "live_orders" }
 
-// StrategyInstanceModel maps to 'strategy_instances' table.
 type StrategyInstanceModel struct {
 	ID              int64          `gorm:"column:id;primaryKey"`
 	TradeID         int            `gorm:"column:trade_id;uniqueIndex:idx_strategy_instance,priority:1"`
@@ -85,7 +80,6 @@ type StrategyInstanceModel struct {
 	CreatedAtUnix   int64          `gorm:"column:created_at"`
 	UpdatedAtUnix   int64          `gorm:"column:updated_at"`
 
-	// Helper fields
 	CreatedAt time.Time `gorm:"-"`
 	UpdatedAt time.Time `gorm:"-"`
 }

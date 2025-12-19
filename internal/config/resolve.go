@@ -5,7 +5,6 @@ import (
 	"strings"
 )
 
-// ResolveModelConfigs 合并 provider 预设与模型条目，返回最终配置。
 func (a AIConfig) ResolveModelConfigs() ([]ResolvedModelConfig, error) {
 	out := make([]ResolvedModelConfig, 0, len(a.Models))
 	presets := a.ProviderPresets
@@ -60,8 +59,6 @@ func (a AIConfig) ResolveModelConfigs() ([]ResolvedModelConfig, error) {
 	return out, nil
 }
 
-// MustResolveModelConfigs 在配置已通过校验时使用。
-// 如果在校验后调用仍出错，说明存在程序错误，应 panic。
 func (a AIConfig) MustResolveModelConfigs() []ResolvedModelConfig {
 	out, err := a.ResolveModelConfigs()
 	if err != nil {

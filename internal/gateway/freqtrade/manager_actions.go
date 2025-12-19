@@ -18,7 +18,6 @@ import (
 	"brale/internal/trader"
 )
 
-// CloseFreqtradePosition closes a position by sending an exit signal to the Trader actor.
 func (m *Manager) CloseFreqtradePosition(ctx context.Context, tradeID int, symbol, side string, closeRatio float64) error {
 	if m.trader == nil {
 		return fmt.Errorf("trader not initialized")
@@ -39,13 +38,15 @@ func (m *Manager) CloseFreqtradePosition(ctx context.Context, tradeID int, symbo
 	}
 
 	data, _ := json.Marshal(payload)
-	m.trader.Send(trader.EventEnvelope{
+	if err := m.trader.Send(trader.EventEnvelope{
 		ID:        managerEventID("", "signal-exit"),
 		Type:      trader.EvtSignalExit,
 		Payload:   data,
 		CreatedAt: time.Now(),
 		Symbol:    strings.ToUpper(strings.TrimSpace(symbol)),
-	})
+	}); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -75,34 +76,16 @@ func (m *Manager) validateTradeForClose(ctx context.Context, tradeID int, symbol
 	return fmt.Errorf("CloseFreqtradePosition: trade %d not active for %s", tradeID, symbol)
 }
 
-// ManualOpenPosition provides an admin UI shortcut to open a trade and materialize its exit plan instances.
 func (m *Manager) ManualOpenPosition(ctx context.Context, req exchange.ManualOpenRequest) error {
 	if m == nil || m.executor == nil {
 		return fmt.Errorf("executor not initialized")
 	}
-	symbol := strings.ToUpper(strings.TrimSpace(req.Symbol))
-	if symbol == "" {
-		return fmt.Errorf("symbol 必填")
-	}
-	side := strings.ToLower(strings.TrimSpace(req.Side))
-	if side != "long" && side != "short" {
-		return fmt.Errorf("side 需为 long 或 short")
-	}
-	if req.PositionSizeUSD <= 0 {
-		return fmt.Errorf("position_size_usd 需 >0")
-	}
-	if req.Leverage <= 0 {
-		return fmt.Errorf("leverage 需 >0")
-	}
-	entryPrice := req.EntryPrice
-	if entryPrice <= 0 {
-		return fmt.Errorf("entry_price 需 >0")
-	}
-	comboKey := strings.ToLower(strings.TrimSpace(req.ExitCombo))
-	if comboKey == "" {
-		return fmt.Errorf("exit_combo 必填")
+	symbol, side, entryPrice, comboKey, err := validateManualOpenRequest(req)
+	if err != nil {
+		return err
 	}
 
+	// Build guard decision to reuse existing validation on stop distance.
 	planSpec, err := buildManualComboPlanSpec(req, entryPrice, side, comboKey)
 	if err != nil {
 		return err
@@ -119,17 +102,7 @@ func (m *Manager) ManualOpenPosition(ctx context.Context, req exchange.ManualOpe
 		return err
 	}
 
-	tagParts := []string{"manual"}
-	if strings.TrimSpace(req.ExitCombo) != "" {
-		tagParts = append(tagParts, strings.TrimSpace(req.ExitCombo))
-	}
-	if strings.TrimSpace(req.Reason) != "" {
-		tagParts = append(tagParts, strings.TrimSpace(req.Reason))
-	}
-	entryTag := strings.Join(tagParts, " | ")
-	if len(entryTag) > 120 {
-		entryTag = entryTag[:120]
-	}
+	entryTag := buildManualEntryTag(req)
 
 	openReq := exchange.OpenRequest{
 		Symbol:    symbol,
@@ -192,74 +165,112 @@ func (m *Manager) ManualOpenPosition(ctx context.Context, req exchange.ManualOpe
 }
 
 func buildManualComboPlanSpec(req exchange.ManualOpenRequest, entryPrice float64, side string, comboKey string) (map[string]any, error) {
-	type tier struct {
-		Target float64
-		Ratio  float64
+	components, err := parseComboComponents(comboKey)
+	if err != nil {
+		return nil, err
 	}
+
+	tpTiers := manualTiers(req.Tier1Target, req.Tier1Ratio, req.Tier2Target, req.Tier2Ratio, req.Tier3Target, req.Tier3Ratio)
+	slTiers := manualTiers(req.SLTier1Target, req.SLTier1Ratio, req.SLTier2Target, req.SLTier2Ratio, req.SLTier3Target, req.SLTier3Ratio)
+
+	hasTP := false
+	hasSL := false
+	children := make([]any, 0, len(components))
+	for _, comp := range components {
+		child, kind, err := buildManualComboChild(comp, req, tpTiers, slTiers)
+		if err != nil {
+			return nil, err
+		}
+		switch kind {
+		case "tp":
+			hasTP = true
+		case "sl":
+			hasSL = true
+		}
+		children = append(children, child)
+	}
+	if !hasTP || !hasSL {
+		return nil, fmt.Errorf("exit_combo 必须同时包含止盈(tp_*)与止损(sl_*)组件")
+	}
+	return map[string]any{"children": children}, nil
+}
+
+func validateManualOpenRequest(req exchange.ManualOpenRequest) (symbol, side string, entryPrice float64, comboKey string, err error) {
+	symbol = strings.ToUpper(strings.TrimSpace(req.Symbol))
+	if symbol == "" {
+		err = fmt.Errorf("symbol 必填")
+		return
+	}
+	side = strings.ToLower(strings.TrimSpace(req.Side))
+	if side != "long" && side != "short" {
+		err = fmt.Errorf("side 需为 long 或 short")
+		return
+	}
+	if req.PositionSizeUSD <= 0 {
+		err = fmt.Errorf("position_size_usd 需 >0")
+		return
+	}
+	if req.Leverage <= 0 {
+		err = fmt.Errorf("leverage 需 >0")
+		return
+	}
+	entryPrice = req.EntryPrice
+	if entryPrice <= 0 {
+		err = fmt.Errorf("entry_price 需 >0")
+		return
+	}
+	comboKey = strings.ToLower(strings.TrimSpace(req.ExitCombo))
+	if comboKey == "" {
+		err = fmt.Errorf("exit_combo 必填")
+		return
+	}
+	return
+}
+
+// buildManualEntryTag composes a readable tag like:
+// "manual | tp_tiers__sl_single | reason text", truncated to 120 chars.
+func buildManualEntryTag(req exchange.ManualOpenRequest) string {
+	tagParts := []string{"manual"}
+	if strings.TrimSpace(req.ExitCombo) != "" {
+		tagParts = append(tagParts, strings.TrimSpace(req.ExitCombo))
+	}
+	if strings.TrimSpace(req.Reason) != "" {
+		tagParts = append(tagParts, strings.TrimSpace(req.Reason))
+	}
+	entryTag := strings.Join(tagParts, " | ")
+	if len(entryTag) > 120 {
+		entryTag = entryTag[:120]
+	}
+	return entryTag
+}
+
+type manualTier struct {
+	Target float64
+	Ratio  float64
+}
+
+func manualTiers(t1, r1, t2, r2, t3, r3 float64) []manualTier {
+	var out []manualTier
+	if t1 > 0 {
+		out = append(out, manualTier{Target: t1, Ratio: r1})
+	}
+	if t2 > 0 {
+		out = append(out, manualTier{Target: t2, Ratio: r2})
+	}
+	if t3 > 0 {
+		out = append(out, manualTier{Target: t3, Ratio: r3})
+	}
+	return out
+}
+
+func parseComboComponents(comboKey string) ([]string, error) {
 	normalize := func(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
 	parts := strings.Split(normalize(comboKey), "__")
 	if len(parts) < 2 {
 		return nil, fmt.Errorf("exit_combo 格式错误: %s", comboKey)
 	}
-	hasTP := false
-	hasSL := false
 	seen := map[string]bool{}
-	children := make([]any, 0, len(parts))
-
-	buildTierParams := func(tiers []tier) (map[string]any, error) {
-		if len(tiers) == 0 {
-			return nil, fmt.Errorf("tiers 不能为空")
-		}
-		if len(tiers) > 3 {
-			tiers = tiers[:3]
-		}
-		sum := 0.0
-		raw := make([]any, 0, len(tiers))
-		for _, t := range tiers {
-			if t.Target <= 0 {
-				return nil, fmt.Errorf("tier target_price 必须 >0")
-			}
-			if t.Ratio <= 0 || t.Ratio > 1 {
-				return nil, fmt.Errorf("tier ratio 需位于 (0,1]")
-			}
-			sum += t.Ratio
-			raw = append(raw, map[string]any{
-				"target_price": t.Target,
-				"ratio":        t.Ratio,
-			})
-		}
-		if len(tiers) == 1 {
-			raw[0].(map[string]any)["ratio"] = 1.0
-			sum = 1.0
-		}
-		if math.Abs(sum-1) > 1e-6 {
-			return nil, fmt.Errorf("tiers 比例合计需为 1，当前=%.4f", sum)
-		}
-		return map[string]any{"tiers": raw}, nil
-	}
-
-	tpTiers := []tier{}
-	if req.Tier1Target > 0 {
-		tpTiers = append(tpTiers, tier{Target: req.Tier1Target, Ratio: req.Tier1Ratio})
-	}
-	if req.Tier2Target > 0 {
-		tpTiers = append(tpTiers, tier{Target: req.Tier2Target, Ratio: req.Tier2Ratio})
-	}
-	if req.Tier3Target > 0 {
-		tpTiers = append(tpTiers, tier{Target: req.Tier3Target, Ratio: req.Tier3Ratio})
-	}
-
-	slTiers := []tier{}
-	if req.SLTier1Target > 0 {
-		slTiers = append(slTiers, tier{Target: req.SLTier1Target, Ratio: req.SLTier1Ratio})
-	}
-	if req.SLTier2Target > 0 {
-		slTiers = append(slTiers, tier{Target: req.SLTier2Target, Ratio: req.SLTier2Ratio})
-	}
-	if req.SLTier3Target > 0 {
-		slTiers = append(slTiers, tier{Target: req.SLTier3Target, Ratio: req.SLTier3Ratio})
-	}
-
+	out := make([]string, 0, len(parts))
 	for _, raw := range parts {
 		comp := normalize(raw)
 		if comp == "" {
@@ -269,73 +280,89 @@ func buildManualComboPlanSpec(req exchange.ManualOpenRequest, entryPrice float64
 			return nil, fmt.Errorf("exit_combo component 重复: %s", comp)
 		}
 		seen[comp] = true
-		switch comp {
-		case "tp_single":
-			hasTP = true
-			if req.TakeProfit <= 0 {
-				return nil, fmt.Errorf("tp_single 需提供 take_profit")
-			}
-			params, err := buildTierParams([]tier{{Target: req.TakeProfit, Ratio: 1}})
-			if err != nil {
-				return nil, err
-			}
-			children = append(children, map[string]any{
-				"component": "tp_single",
-				"handler":   "tier_take_profit",
-				"params":    params,
-			})
-		case "tp_tiers":
-			hasTP = true
-			if len(tpTiers) == 0 {
-				return nil, fmt.Errorf("tp_tiers 需提供 tier1/2/3 目标价")
-			}
-			params, err := buildTierParams(tpTiers)
-			if err != nil {
-				return nil, err
-			}
-			children = append(children, map[string]any{
-				"component": "tp_tiers",
-				"handler":   "tier_take_profit",
-				"params":    params,
-			})
-		case "sl_single":
-			hasSL = true
-			if req.StopLoss <= 0 {
-				return nil, fmt.Errorf("sl_single 需提供 stop_loss")
-			}
-			params, err := buildTierParams([]tier{{Target: req.StopLoss, Ratio: 1}})
-			if err != nil {
-				return nil, err
-			}
-			children = append(children, map[string]any{
-				"component": "sl_single",
-				"handler":   "tier_stop_loss",
-				"params":    params,
-			})
-		case "sl_tiers":
-			hasSL = true
-			if len(slTiers) == 0 {
-				return nil, fmt.Errorf("sl_tiers 需提供 sl_tier1/2/3 目标价（不再自动生成）")
-			}
-			params, err := buildTierParams(slTiers)
-			if err != nil {
-				return nil, err
-			}
-			children = append(children, map[string]any{
-				"component": "sl_tiers",
-				"handler":   "tier_stop_loss",
-				"params":    params,
-			})
-		case "tp_atr", "sl_atr":
-			return nil, fmt.Errorf("手动开仓暂不支持 ATR 组件: %s", comp)
-		default:
-			return nil, fmt.Errorf("未知 exit_combo component: %s", comp)
+		out = append(out, comp)
+	}
+	if len(out) < 2 {
+		return nil, fmt.Errorf("exit_combo 格式错误: %s", comboKey)
+	}
+	return out, nil
+}
+
+func buildManualComboChild(comp string, req exchange.ManualOpenRequest, tpTiers, slTiers []manualTier) (map[string]any, string, error) {
+	switch comp {
+	case "tp_single":
+		if req.TakeProfit <= 0 {
+			return nil, "", fmt.Errorf("tp_single 需提供 take_profit")
 		}
+		params, err := buildManualTierParams([]manualTier{{Target: req.TakeProfit, Ratio: 1}})
+		if err != nil {
+			return nil, "", err
+		}
+		return map[string]any{"component": "tp_single", "handler": "tier_take_profit", "params": params}, "tp", nil
+	case "tp_tiers":
+		if len(tpTiers) == 0 {
+			return nil, "", fmt.Errorf("tp_tiers 需提供 tier1/2/3 目标价")
+		}
+		params, err := buildManualTierParams(tpTiers)
+		if err != nil {
+			return nil, "", err
+		}
+		return map[string]any{"component": "tp_tiers", "handler": "tier_take_profit", "params": params}, "tp", nil
+	case "sl_single":
+		if req.StopLoss <= 0 {
+			return nil, "", fmt.Errorf("sl_single 需提供 stop_loss")
+		}
+		params, err := buildManualTierParams([]manualTier{{Target: req.StopLoss, Ratio: 1}})
+		if err != nil {
+			return nil, "", err
+		}
+		return map[string]any{"component": "sl_single", "handler": "tier_stop_loss", "params": params}, "sl", nil
+	case "sl_tiers":
+		if len(slTiers) == 0 {
+			return nil, "", fmt.Errorf("sl_tiers 需提供 sl_tier1/2/3 目标价（不再自动生成）")
+		}
+		params, err := buildManualTierParams(slTiers)
+		if err != nil {
+			return nil, "", err
+		}
+		return map[string]any{"component": "sl_tiers", "handler": "tier_stop_loss", "params": params}, "sl", nil
+	case "tp_atr", "sl_atr":
+		return nil, "", fmt.Errorf("手动开仓暂不支持 ATR 组件: %s", comp)
+	default:
+		return nil, "", fmt.Errorf("未知 exit_combo component: %s", comp)
 	}
-	if !hasTP || !hasSL {
-		return nil, fmt.Errorf("exit_combo 必须同时包含止盈(tp_*)与止损(sl_*)组件")
+}
+
+func buildManualTierParams(tiers []manualTier) (map[string]any, error) {
+	if len(tiers) == 0 {
+		return nil, fmt.Errorf("tiers 不能为空")
 	}
-	return map[string]any{"children": children}, nil
+	if len(tiers) > 3 {
+		tiers = tiers[:3]
+	}
+	sum := 0.0
+	raw := make([]any, 0, len(tiers))
+	for _, t := range tiers {
+		if t.Target <= 0 {
+			return nil, fmt.Errorf("tier target_price 必须 >0")
+		}
+		if t.Ratio <= 0 || t.Ratio > 1 {
+			return nil, fmt.Errorf("tier ratio 需位于 (0,1]")
+		}
+		sum += t.Ratio
+		raw = append(raw, map[string]any{
+			"target_price": t.Target,
+			"ratio":        t.Ratio,
+		})
+	}
+	if len(tiers) == 1 {
+		raw[0].(map[string]any)["ratio"] = 1.0
+		sum = 1.0
+	}
+	if math.Abs(sum-1) > 1e-6 {
+		return nil, fmt.Errorf("tiers 比例合计需为 1，当前=%.4f", sum)
+	}
+	return map[string]any{"tiers": raw}, nil
 }
 
 func (m *Manager) currentPositionAmount(symbol string) float64 {

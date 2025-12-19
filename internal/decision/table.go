@@ -5,14 +5,12 @@ import (
 	"strings"
 )
 
-// ThoughtRow 用于汇总多个模型的思维链。
 type ThoughtRow struct {
 	Provider string
 	Thought  string
 	Failed   bool
 }
 
-// ResultRow 用于汇总多个模型的决策结果。
 type ResultRow struct {
 	Provider string
 	Action   string
@@ -21,7 +19,6 @@ type ResultRow struct {
 	Failed   bool
 }
 
-// RenderThoughtsTable 以纯文本形式输出模型思维链（逐条换行）。
 func RenderThoughtsTable(rows []ThoughtRow, _ int) string {
 	if len(rows) == 0 {
 		return ""
@@ -44,7 +41,6 @@ func RenderThoughtsTable(rows []ThoughtRow, _ int) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-// RenderResultsTable 以纯文本形式输出模型决策结果。
 func RenderResultsTable(rows []ResultRow, _ int) string {
 	if len(rows) == 0 {
 		return ""
@@ -68,7 +64,6 @@ func RenderResultsTable(rows []ResultRow, _ int) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-// RenderBlockTable 输出简单的标题+正文块。
 func RenderBlockTable(title, content string) string {
 	title = fallback(title, "Note")
 	body := strings.TrimSpace(content)
@@ -82,7 +77,6 @@ func RenderBlockTable(title, content string) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-// RenderFinalDecisionsTable 输出最终聚合结果。
 func RenderFinalDecisionsTable(ds []Decision, _ int) string {
 	var sb strings.Builder
 	sb.WriteString("=== Final Decisions ===\n")
@@ -100,7 +94,7 @@ func RenderFinalDecisionsTable(ds []Decision, _ int) string {
 			tp = fmt.Sprintf("%.4f", d.TakeProfit)
 		}
 		sb.WriteString(fmt.Sprintf("- action=%s symbol=%s sl=%s tp=%s\n", strings.TrimSpace(d.Action), strings.TrimSpace(d.Symbol), sl, tp))
-		// Tiers display removed
+
 		reason := strings.TrimSpace(d.Reasoning)
 		if reason != "" {
 			sb.WriteString(indentLines(reason, "    "))

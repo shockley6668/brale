@@ -9,7 +9,6 @@ import (
 	"brale/internal/strategy/exit"
 )
 
-// decodePlanReason parses plan:component:event format and returns display strings.
 func decodePlanReason(reason string) (string, string) {
 	reason = strings.TrimSpace(reason)
 	if reason == "" {

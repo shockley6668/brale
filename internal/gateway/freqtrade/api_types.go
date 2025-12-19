@@ -7,7 +7,6 @@ import (
 	"brale/internal/strategy/exit"
 )
 
-// APIPosition 用于 /api/live/freqtrade/positions 返回的数据结构。
 type APIPosition struct {
 	TradeID            int                    `json:"trade_id"`
 	Symbol             string                 `json:"symbol"`
@@ -40,7 +39,6 @@ type APIPosition struct {
 	ExitReason         string                 `json:"exit_reason,omitempty"`
 }
 
-// TradeEvent represents a trade operation event for API responses.
 type TradeEvent struct {
 	FreqtradeID int            `json:"freqtrade_id"`
 	Symbol      string         `json:"symbol"`
@@ -49,7 +47,6 @@ type TradeEvent struct {
 	Timestamp   time.Time      `json:"timestamp"`
 }
 
-// StrategyPlanSnapshot wraps exit.StrategyPlanSnapshot for API compatibility.
 type StrategyPlanSnapshot = exit.StrategyPlanSnapshot
 
 type PositionListOptions struct {
@@ -67,7 +64,6 @@ type PositionListResult struct {
 	Positions  []APIPosition `json:"positions"`
 }
 
-// PlanUpdateHook defined interface for plan updates
 type PlanUpdateHook interface {
 	NotifyPlanUpdated(ctx context.Context, tradeID int)
 }

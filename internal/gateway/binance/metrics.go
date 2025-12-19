@@ -9,12 +9,11 @@ import (
 	"brale/internal/pkg/symbol"
 )
 
-// GetFundingRate 获取最新资金费率（例如 0.0001 即 0.01%）
 func (s *Source) GetFundingRate(ctx context.Context, sym string) (float64, error) {
 	if s == nil || s.client == nil {
 		return 0, fmt.Errorf("binance source not initialized")
 	}
-	// Convert to Binance format: ETH/USDT -> ETHUSDT
+
 	binanceSymbol := symbol.Parse(sym).Binance()
 	if binanceSymbol == "" {
 		return 0, fmt.Errorf("invalid symbol: %s", sym)
@@ -37,7 +36,6 @@ func (s *Source) GetFundingRate(ctx context.Context, sym string) (float64, error
 	return 0, fmt.Errorf("funding rate not available for %s", sym)
 }
 
-// GetOpenInterestHistory 获取 OI 历史数据
 func (s *Source) GetOpenInterestHistory(ctx context.Context, sym, period string, limit int) ([]market.OpenInterestPoint, error) {
 	if s == nil || s.client == nil {
 		return nil, fmt.Errorf("binance source not initialized")
@@ -48,7 +46,7 @@ func (s *Source) GetOpenInterestHistory(ctx context.Context, sym, period string,
 	if limit > 500 {
 		limit = 500
 	}
-	// Convert to Binance format: ETH/USDT -> ETHUSDT
+
 	binanceSymbol := symbol.Parse(sym).Binance()
 	period = strings.ToLower(strings.TrimSpace(period))
 	if binanceSymbol == "" || period == "" {

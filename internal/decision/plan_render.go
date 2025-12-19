@@ -10,8 +10,6 @@ import (
 	formatutil "brale/internal/pkg/format"
 )
 
-// Exit Plan rendering functions extracted from legacy_adapter.go
-
 type planStateView struct {
 	PlanID             string              `json:"plan_id"`
 	Version            int                 `json:"version"`

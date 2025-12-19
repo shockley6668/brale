@@ -394,6 +394,42 @@
                                                 </div>
                                             </template>
                                         </template>
+                                        <template v-if="stageLabel(step.stage)==='PROVIDER' && (decisionFilters.stage || '').toLowerCase() === 'provider'">
+                                            <div class="step-label mt-4">Prompts</div>
+                                            <div v-if="!((step.system_prompt || '').trim() || (step.user_prompt || '').trim())" class="muted italic">
+                                                暂无 Prompt 数据。
+                                            </div>
+                                            <template v-else>
+                                                <div class="step-label" v-if="showSystemPrompt && (step.system_prompt || '').trim()">System Prompt</div>
+                                                <pre class="step-text" v-if="showSystemPrompt && (step.system_prompt || '').trim()">[[ step.system_prompt ]]</pre>
+                                                <template v-if="showUserPrompt">
+                                                    <div class="step-label">User Prompt</div>
+                                                    <pre class="step-text">[[ cleanUserPrompt(step.user_prompt) ]]</pre>
+                                                    <template v-for="(block, blockIdx) in extractCsvBlocks(step.user_prompt)" :key="csvBlockKey(step, blockIdx, block.tag)">
+                                                        <div class="csv-block">
+                                                            <button class="csv-toggle" type="button" @click="toggleCsvBlock(csvBlockKey(step, blockIdx, block.tag))">
+                                                                <span>[[ block.label ]] · [[ block.rows.length ]]行</span>
+                                                                <span>[[ isCsvExpanded(csvBlockKey(step, blockIdx, block.tag)) ? '收起' : '展开' ]]</span>
+                                                            </button>
+                                                            <div class="csv-table-wrapper" v-if="isCsvExpanded(csvBlockKey(step, blockIdx, block.tag))">
+                                                                <table class="csv-table">
+                                                                    <thead>
+                                                                        <tr>
+                                                                            <th v-for="(header, headerIdx) in block.headers" :key="headerIdx">[[ header ]]</th>
+                                                                        </tr>
+                                                                    </thead>
+                                                                    <tbody>
+                                                                        <tr v-for="(row, rowIdx) in block.rows" :key="rowIdx">
+                                                                            <td v-for="(cell, cellIdx) in row" :key="cellIdx">[[ cell ]]</td>
+                                                                        </tr>
+                                                                    </tbody>
+                                                                </table>
+                                                            </div>
+                                                        </div>
+                                                    </template>
+                                                </template>
+                                            </template>
+                                        </template>
                                     </div>
                                 </div>
                                 <div class="mobile-step-toggle" v-if="stepExpandAvailable">
@@ -405,7 +441,7 @@
                                     <div class="block-header">
                                         <div>
                                             <p class="notion-section-title">Prompts</p>
-                                            <h3>Shared Prompt</h3>
+                                            <h3>[[ (decisionFilters.stage || '').toLowerCase() === 'provider' ? 'Provider Prompts' : 'Shared Prompt' ]]</h3>
                                         </div>
                                         <div class="prompt-toggle">
                                             <button class="pill-btn" :class="{primary: showSystemPrompt}" @click="showSystemPrompt = !showSystemPrompt">
@@ -416,36 +452,76 @@
                                             </button>
                                         </div>
                                     </div>
-                                    <div v-if="!((sharedPrompts.systemPrompt || '').trim() || (sharedPrompts.userPrompt || '').trim())" class="muted italic">
-                                        暂无 Prompt 数据。
-                                    </div>
+                                    <template v-if="(decisionFilters.stage || '').toLowerCase() === 'provider'">
+                                        <div v-if="!providerPromptBlocks.length" class="muted italic">
+                                            暂无 Prompt 数据。
+                                        </div>
+                                        <template v-else>
+                                            <div v-for="prompt in providerPromptBlocks" :key="prompt.providerId" class="mt-4">
+                                                <div class="step-label">[[ prompt.providerId ]]</div>
+                                                <div class="step-label" v-if="showSystemPrompt && (prompt.systemPrompt || '').trim()">System Prompt</div>
+                                                <pre class="step-text" v-if="showSystemPrompt && (prompt.systemPrompt || '').trim()">[[ prompt.systemPrompt ]]</pre>
+                                                <template v-if="showUserPrompt">
+                                                    <div class="step-label">User Prompt</div>
+                                                    <pre class="step-text">[[ cleanUserPrompt(prompt.userPrompt) ]]</pre>
+                                                    <template v-for="(block, blockIdx) in extractCsvBlocks(prompt.userPrompt)" :key="providerCsvBlockKey(prompt.providerId, blockIdx, block.tag)">
+                                                        <div class="csv-block">
+                                                            <button class="csv-toggle" type="button" @click="toggleCsvBlock(providerCsvBlockKey(prompt.providerId, blockIdx, block.tag))">
+                                                                <span>[[ block.label ]] · [[ block.rows.length ]]行</span>
+                                                                <span>[[ isCsvExpanded(providerCsvBlockKey(prompt.providerId, blockIdx, block.tag)) ? '收起' : '展开' ]]</span>
+                                                            </button>
+                                                            <div class="csv-table-wrapper" v-if="isCsvExpanded(providerCsvBlockKey(prompt.providerId, blockIdx, block.tag))">
+                                                                <table class="csv-table">
+                                                                    <thead>
+                                                                        <tr>
+                                                                            <th v-for="(header, headerIdx) in block.headers" :key="headerIdx">[[ header ]]</th>
+                                                                        </tr>
+                                                                    </thead>
+                                                                    <tbody>
+                                                                        <tr v-for="(row, rowIdx) in block.rows" :key="rowIdx">
+                                                                            <td v-for="(cell, cellIdx) in row" :key="cellIdx">[[ cell ]]</td>
+                                                                        </tr>
+                                                                    </tbody>
+                                                                </table>
+                                                            </div>
+                                                        </div>
+                                                    </template>
+                                                </template>
+                                            </div>
+                                        </template>
+                                    </template>
                                     <template v-else>
-                                        <div class="step-label" v-if="showSystemPrompt && (sharedPrompts.systemPrompt || '').trim()">System Prompt</div>
-                                        <pre class="step-text" v-if="showSystemPrompt && (sharedPrompts.systemPrompt || '').trim()">[[ sharedPrompts.systemPrompt ]]</pre>
-                                        <template v-if="showUserPrompt">
-                                            <div class="step-label">User Prompt</div>
-                                            <pre class="step-text">[[ cleanUserPrompt(sharedPrompts.userPrompt) ]]</pre>
-                                            <template v-for="(block, blockIdx) in extractCsvBlocks(sharedPrompts.userPrompt)" :key="sharedCsvBlockKey(blockIdx, block.tag)">
-                                                <div class="csv-block">
-                                                    <button class="csv-toggle" type="button" @click="toggleCsvBlock(sharedCsvBlockKey(blockIdx, block.tag))">
-                                                        <span>[[ block.label ]] · [[ block.rows.length ]]行</span>
-                                                        <span>[[ isCsvExpanded(sharedCsvBlockKey(blockIdx, block.tag)) ? '收起' : '展开' ]]</span>
-                                                    </button>
-                                                    <div class="csv-table-wrapper" v-if="isCsvExpanded(sharedCsvBlockKey(blockIdx, block.tag))">
-                                                        <table class="csv-table">
-                                                            <thead>
-                                                                <tr>
-                                                                    <th v-for="(header, headerIdx) in block.headers" :key="headerIdx">[[ header ]]</th>
-                                                                </tr>
-                                                            </thead>
-                                                            <tbody>
-                                                                <tr v-for="(row, rowIdx) in block.rows" :key="rowIdx">
-                                                                    <td v-for="(cell, cellIdx) in row" :key="cellIdx">[[ cell ]]</td>
-                                                                </tr>
-                                                            </tbody>
-                                                        </table>
+                                        <div v-if="!((sharedPrompts.systemPrompt || '').trim() || (sharedPrompts.userPrompt || '').trim())" class="muted italic">
+                                            暂无 Prompt 数据。
+                                        </div>
+                                        <template v-else>
+                                            <div class="step-label" v-if="showSystemPrompt && (sharedPrompts.systemPrompt || '').trim()">System Prompt</div>
+                                            <pre class="step-text" v-if="showSystemPrompt && (sharedPrompts.systemPrompt || '').trim()">[[ sharedPrompts.systemPrompt ]]</pre>
+                                            <template v-if="showUserPrompt">
+                                                <div class="step-label">User Prompt</div>
+                                                <pre class="step-text">[[ cleanUserPrompt(sharedPrompts.userPrompt) ]]</pre>
+                                                <template v-for="(block, blockIdx) in extractCsvBlocks(sharedPrompts.userPrompt)" :key="sharedCsvBlockKey(blockIdx, block.tag)">
+                                                    <div class="csv-block">
+                                                        <button class="csv-toggle" type="button" @click="toggleCsvBlock(sharedCsvBlockKey(blockIdx, block.tag))">
+                                                            <span>[[ block.label ]] · [[ block.rows.length ]]行</span>
+                                                            <span>[[ isCsvExpanded(sharedCsvBlockKey(blockIdx, block.tag)) ? '收起' : '展开' ]]</span>
+                                                        </button>
+                                                        <div class="csv-table-wrapper" v-if="isCsvExpanded(sharedCsvBlockKey(blockIdx, block.tag))">
+                                                            <table class="csv-table">
+                                                                <thead>
+                                                                    <tr>
+                                                                        <th v-for="(header, headerIdx) in block.headers" :key="headerIdx">[[ header ]]</th>
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody>
+                                                                    <tr v-for="(row, rowIdx) in block.rows" :key="rowIdx">
+                                                                        <td v-for="(cell, cellIdx) in row" :key="cellIdx">[[ cell ]]</td>
+                                                                    </tr>
+                                                                </tbody>
+                                                            </table>
+                                                        </div>
                                                     </div>
-                                                </div>
+                                                </template>
                                             </template>
                                         </template>
                                     </template>

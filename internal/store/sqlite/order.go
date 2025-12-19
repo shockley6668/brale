@@ -10,17 +10,14 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// orderRepository implements the OrderRepository interface.
 type orderRepository struct {
 	db *gorm.DB
 }
 
-// NewOrderRepo creates a new orderRepo.
 func NewOrderRepo(db *gorm.DB) *orderRepository {
 	return &orderRepository{db: db}
 }
 
-// Save saves or updates an order.
 func (r *orderRepository) Save(ctx context.Context, order *model.LiveOrderModel) error {
 	if order == nil {
 		return errors.New("order cannot be nil")
@@ -31,7 +28,6 @@ func (r *orderRepository) Save(ctx context.Context, order *model.LiveOrderModel)
 	}).Save(order).Error
 }
 
-// FindByID finds an order by FreqtradeID.
 func (r *orderRepository) FindByID(ctx context.Context, id int) (*model.LiveOrderModel, error) {
 	var order model.LiveOrderModel
 	err := r.db.WithContext(ctx).Where("freqtrade_id = ?", id).First(&order).Error
@@ -44,7 +40,6 @@ func (r *orderRepository) FindByID(ctx context.Context, id int) (*model.LiveOrde
 	return &order, nil
 }
 
-// ListActive lists all active orders (statuses: Open, Partial, Retrying, Opening, ClosingPartial, ClosingFull).
 func (r *orderRepository) ListActive(ctx context.Context) ([]model.LiveOrderModel, error) {
 	var orders []model.LiveOrderModel
 	statuses := []int{
@@ -64,7 +59,6 @@ func (r *orderRepository) ListActive(ctx context.Context) ([]model.LiveOrderMode
 	return orders, nil
 }
 
-// ListRecent lists recent orders.
 func (r *orderRepository) ListRecent(ctx context.Context, limit int) ([]model.LiveOrderModel, error) {
 	var orders []model.LiveOrderModel
 	if limit <= 0 {

@@ -13,8 +13,6 @@ import (
 	"brale/internal/types"
 )
 
-// composer_render.go contains render methods for Composer, extracted from legacy prompt_render.go etc.
-
 func (c *Composer) renderAccountOverview(account types.AccountSnapshot) string {
 	var b strings.Builder
 	if account.Total <= 0 && account.Available <= 0 && account.Used <= 0 {
@@ -313,92 +311,13 @@ func (c *Composer) renderAgentBlocks(insights []AgentInsight) string {
 }
 
 func (c *Composer) renderOutputConstraints(input Context) string {
-	if len(input.ProfilePrompts) == 0 {
-		return ""
-	}
-	symbols := make([]string, 0, len(input.ProfilePrompts))
-	for sym := range input.ProfilePrompts {
-		key := strings.ToUpper(strings.TrimSpace(sym))
-		if key == "" {
-			continue
-		}
-		symbols = append(symbols, key)
-	}
-	if len(symbols) == 0 {
-		return ""
-	}
-	sort.Strings(symbols)
-	var blocks []string
-	for _, sym := range symbols {
-		spec, ok := input.ProfilePrompts[sym]
-		if !ok {
-			continue
-		}
-		userPrompt := strings.TrimSpace(spec.UserPrompt)
-		exitText := strings.TrimSpace(spec.ExitConstraints)
-		example := strings.TrimSpace(spec.Example)
-		if userPrompt == "" && exitText == "" && example == "" {
-			continue
-		}
-		var b strings.Builder
-		meta := make([]string, 0, 3)
-		if profile := strings.TrimSpace(spec.Profile); profile != "" {
-			meta = append(meta, fmt.Sprintf("Profile=%s", profile))
-		}
-		if tag := strings.TrimSpace(spec.ContextTag); tag != "" {
-			meta = append(meta, fmt.Sprintf("Context=%s", tag))
-		}
-		if ref := strings.TrimSpace(spec.PromptRef); ref != "" {
-			meta = append(meta, fmt.Sprintf("Prompt=%s", ref))
-		}
-		header := fmt.Sprintf("- %s", sym)
-		if len(meta) > 0 {
-			header = fmt.Sprintf("%s (%s)", header, strings.Join(meta, " | "))
-		}
-		b.WriteString(header + "\n")
-		if userPrompt != "" {
-			b.WriteString(userPrompt)
-			if !strings.HasSuffix(userPrompt, "\n") {
-				b.WriteByte('\n')
-			}
-		}
-		if exitText != "" {
-			if userPrompt != "" {
-				b.WriteByte('\n')
-			}
-			b.WriteString(exitText)
-			if !strings.HasSuffix(exitText, "\n") {
-				b.WriteByte('\n')
-			}
-		}
-		if example != "" {
-			if userPrompt != "" || exitText != "" {
-				b.WriteByte('\n')
-			}
-			b.WriteString("只可返回json，不用输出其他内容。示例:\n```json\n")
-			b.WriteString(example)
-			b.WriteString("\n```\n")
-		}
-		blocks = append(blocks, b.String())
-	}
-	if len(blocks) == 0 {
-		return ""
-	}
-	var out strings.Builder
-	out.WriteString("\n## 输出约束\n")
-	for i, blk := range blocks {
-		if i > 0 {
-			out.WriteByte('\n')
-		}
-		out.WriteString(blk)
-	}
-	return out.String()
+	return renderOutputConstraints(input.ProfilePrompts, "只可返回json，不用输出其他内容。示例:")
 }
 
 func (c *Composer) logStructuredBlocksDebug(ctxs []AnalysisContext) {
 	if !c.DebugStructuredBlocks || len(ctxs) == 0 {
 		return
 	}
-	// Simplified debug log
+
 	logger.Debugf("DebugStructuredBlocks: count=%d", len(ctxs))
 }

@@ -2,7 +2,6 @@ package decisionlog
 
 import "context"
 
-// AddOrderPnLColumns 为 live_orders 添加 pnl_ratio/pnl_usd 列（幂等）。
 func (s *DecisionLogStore) AddOrderPnLColumns() error {
 	if s == nil {
 		return nil
@@ -27,7 +26,7 @@ func (s *DecisionLogStore) AddOrderPnLColumns() error {
 	}
 	for _, q := range queries {
 		if _, err := db.ExecContext(context.Background(), q); err != nil {
-			// 忽略已存在错误
+
 			continue
 		}
 	}

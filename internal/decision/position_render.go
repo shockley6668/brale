@@ -8,8 +8,6 @@ import (
 	"brale/internal/types"
 )
 
-// Position and Account rendering functions extracted from legacy_adapter.go
-
 func (e *LegacyEngineAdapter) renderAccountOverview(account types.AccountSnapshot) string {
 	var b strings.Builder
 	if account.Total <= 0 && account.Available <= 0 && account.Used <= 0 {

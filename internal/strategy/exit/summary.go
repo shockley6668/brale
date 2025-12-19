@@ -9,7 +9,6 @@ import (
 	"brale/internal/gateway/database"
 )
 
-// Summaries 将 strategy_instances 记录转换为可读文本。
 func Summaries(recs []database.StrategyInstanceRecord) []string {
 	out := make([]string, 0, len(recs))
 	for _, rec := range recs {
@@ -110,7 +109,6 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-// StatusLabel 将 StrategyStatus 映射为可读文本。
 func StatusLabel(st database.StrategyStatus) string {
 	switch st {
 	case database.StrategyStatusPending:

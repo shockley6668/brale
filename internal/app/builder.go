@@ -16,6 +16,7 @@ import (
 	"brale/internal/gateway/notifier"
 	"brale/internal/gateway/provider"
 	"brale/internal/logger"
+	"brale/internal/market"
 	"brale/internal/pipeline/factory"
 	"brale/internal/profile"
 	promptkit "brale/internal/prompt"
@@ -30,7 +31,6 @@ import (
 	"gorm.io/gorm"
 )
 
-// AppBuilder uses dependency injection to assemble *App instances.
 type AppBuilder struct {
 	cfg *brcfg.Config
 
@@ -46,10 +46,8 @@ type AppBuilder struct {
 	newStoreOverride      store.Store
 }
 
-// AppBuilderOption customizes an AppBuilder dependency.
 type AppBuilderOption func(*AppBuilder)
 
-// NewAppBuilder creates a builder with default dependencies.
 func NewAppBuilder(cfg *brcfg.Config, opts ...AppBuilderOption) *AppBuilder {
 	b := &AppBuilder{
 		cfg:                 cfg,
@@ -76,7 +74,6 @@ func loadPromptManager(dir string) (*strategy.Manager, error) {
 	return pm, nil
 }
 
-// Build assembles the application using injected dependencies.
 func (b *AppBuilder) Build(ctx context.Context) (*App, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -87,50 +84,22 @@ func (b *AppBuilder) Build(ctx context.Context) (*App, error) {
 	cfg := b.cfg
 	logger.SetLevel(cfg.App.LogLevel)
 
-	var profileLoader *cfgloader.ProfileLoader
-	if strings.TrimSpace(cfg.AI.ProfilesPath) == "" {
-		return nil, fmt.Errorf("ai.profiles_path 未配置，无法加载 profile")
-	}
-	profileLoader, err := cfgloader.NewProfileLoader(cfg.AI.ProfilesPath)
-	if err != nil {
-		return nil, fmt.Errorf("加载 profile 配置失败: %w", err)
-	}
-	profileSnapshot := profileLoader.Snapshot()
-	syms, profileIntervals, lookbacks, derivativeSymbols, err := collectProfileUniverse(profileSnapshot, cfg.Kline.MaxCached)
+	profiles, err := b.loadProfileSetup(cfg)
 	if err != nil {
 		return nil, err
 	}
-	logger.Infof("✓ 已加载 %d 个交易对: %v", len(syms), syms)
-	logger.Infof("✓ Profile 周期: %v", profileIntervals)
-	hSummary := formatProfileSummary(syms, profileIntervals)
-	logger.Infof("[profiles]\n%s", hSummary)
-	// logProfileMiddlewares(profileSnapshot)
+	logger.Infof("✓ 已加载 %d 个交易对: %v", len(profiles.symbols), profiles.symbols)
+	logger.Infof("✓ Profile 周期: %v", profiles.intervals)
+	logger.Infof("[profiles]\n%s", profiles.summary)
 
-	applyDefaultMultiAgentBlocks(cfg, len(syms), len(profileIntervals))
+	applyDefaultMultiAgentBlocks(cfg, len(profiles.symbols), len(profiles.intervals))
 
-	pm, err := b.promptManagerFn(cfg.Prompt.Dir)
-	if err != nil {
-		return nil, fmt.Errorf("加载提示词模板失败: %w", err)
-	}
-	if content, ok := pm.Get(cfg.Prompt.SystemTemplate); ok {
-		logger.Infof("✓ 提示词模板 '%s' 已就绪，长度=%d 字符", cfg.Prompt.SystemTemplate, len(content))
-	} else {
-		logger.Warnf("未找到提示词模板 '%s'", cfg.Prompt.SystemTemplate)
-	}
-	var promptLoader profile.PromptLoader
-	if pm != nil {
-		promptLoader = profile.NewPromptLoader(pm, ".", cfg.Prompt.Dir)
-	}
-
-	requiredModelIDs, err := enabledFinalModelIDs(cfg.AI)
+	pm, promptLoader, err := b.loadPromptSetup(cfg, profiles.snapshot)
 	if err != nil {
 		return nil, err
 	}
-	if err := validateProfilePrompts(profileSnapshot, promptLoader, requiredModelIDs); err != nil {
-		return nil, err
-	}
 
-	marketStack, err := b.marketStackFn(ctx, cfg, syms, profileIntervals, lookbacks, derivativeSymbols)
+	marketStack, err := b.marketStackFn(ctx, cfg, profiles.symbols, profiles.intervals, profiles.lookbacks, profiles.derivativeSymbols)
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +119,7 @@ func (b *AppBuilder) Build(ctx context.Context) (*App, error) {
 		PromptMgr:          pm,
 		SystemTemplate:     cfg.Prompt.SystemTemplate,
 		Store:              ks,
-		Intervals:          profileIntervals,
+		Intervals:          profiles.intervals,
 		HorizonName:        cfg.AI.ActiveHorizon,
 		MultiAgent:         cfg.AI.MultiAgent,
 		ProviderPreference: cfg.AI.ProviderPreference,
@@ -174,99 +143,22 @@ func (b *AppBuilder) Build(ctx context.Context) (*App, error) {
 		return nil, err
 	}
 
-	var (
-		strategyStore exit.StrategyStore
-		liveStore     database.LivePositionStore
-		newStore      store.Store
-		sharedGorm    *gorm.DB
-	)
-	if b.strategyStoreOverride != nil {
-		strategyStore = b.strategyStoreOverride
-	}
-	if b.liveStoreOverride != nil {
-		liveStore = b.liveStoreOverride
-	} else if b.strategyStoreOverride != nil {
-		if ls, ok := strategyStore.(database.LivePositionStore); ok {
-			liveStore = ls
-		}
-	}
-	if b.newStoreOverride != nil {
-		newStore = b.newStoreOverride
-	}
-
-	if strategyStore == nil || liveStore == nil || newStore == nil {
-		path := strings.TrimSpace(cfg.AI.DecisionLogPath)
-		if path == "" {
-			return nil, fmt.Errorf("ai.decision_log_path 未配置，无法初始化存储")
-		}
-		gormStore, err := gormstore.NewGormStore(path)
-		if err != nil {
-			return nil, fmt.Errorf("初始化 gorm 存储失败: %w", err)
-		}
-		strategyStore = gormStore
-		liveStore = gormStore
-		sharedGorm = gormStore.GormDB()
-		if decArtifacts.store != nil {
-			sqlDB, err := gormStore.SQLDB()
-			if err != nil {
-				return nil, fmt.Errorf("获取 SQL DB 失败: %w", err)
-			}
-			if err := decArtifacts.store.UseExternalDB(sqlDB); err != nil {
-				return nil, fmt.Errorf("绑定决策日志存储失败: %w", err)
-			}
-		}
-		if newStore == nil {
-			if sharedGorm != nil {
-				ns, err := sqlite.NewSqliteStoreFromDB(sharedGorm)
-				if err != nil {
-					return nil, fmt.Errorf("初始化 sqlite 存储失败: %w", err)
-				}
-				newStore = ns
-			} else {
-				ns, err := sqlite.NewSqliteStore(path)
-				if err != nil {
-					return nil, fmt.Errorf("初始化 sqlite 存储失败: %w", err)
-				}
-				newStore = ns
-			}
-		}
-	}
-
-	freqManager, err := b.freqManagerFn(cfg.Freqtrade, cfg.AI.ActiveHorizon, decArtifacts.store, liveStore, newStore, textNotifier)
+	stores, err := b.resolveStores(cfg, decArtifacts)
 	if err != nil {
 		return nil, err
 	}
 
-	var profileMgr *profile.Manager
-	if exporter, ok := ks.(store.SnapshotExporter); ok {
-		pipeFactory := &factory.Factory{
-			Exporter:     exporter,
-			DefaultLimit: cfg.Kline.MaxCached,
-		}
-		profileMgr = profile.NewManager(profileLoader, pipeFactory, promptLoader)
-	} else {
-		logger.Warnf("K 线存储不支持快照导出，Pipeline 功能被禁用")
+	freqManager, err := b.freqManagerFn(cfg.Freqtrade, cfg.AI.ActiveHorizon, decArtifacts.store, stores.liveStore, stores.stateStore, textNotifier)
+	if err != nil {
+		return nil, err
 	}
 
-	var exitRegistry *exitplan.Registry
-	var planHandlers *exit.HandlerRegistry
-	if path := strings.TrimSpace(cfg.AI.ExitPlanPath); path != "" {
-		reg, err := exitplan.NewRegistry(path)
-		if err != nil {
-			return nil, fmt.Errorf("加载 exit plan 配置失败: %w", err)
-		}
-		exitRegistry = reg
-		engine.ExitPlans = reg
-	}
-	planHandlers = exit.NewHandlerRegistry()
-	exitHandlers.RegisterCoreHandlers(planHandlers)
+	profileMgr := b.buildProfileManager(cfg, profiles.loader, ks, promptLoader)
 
-	exitPromptIndex := promptkit.BuildPromptsFromCombos(collectProfileCombos(profileSnapshot))
-	if len(exitPromptIndex) == 0 {
-		return nil, fmt.Errorf("profile 未配置 exit_plan 组合，启动中止")
+	exitRegistry, planHandlers, exitPromptIndex, symbolDetails, err := b.setupExitPlans(cfg, engine, profiles.snapshot)
+	if err != nil {
+		return nil, err
 	}
-
-	symbolDetails := collectSymbolDetails(profileSnapshot, exitRegistry)
 
 	liveSvc := agent.NewLiveService(agent.LiveServiceParams{
 		Config:          cfg,
@@ -275,17 +167,17 @@ func (b *AppBuilder) Build(ctx context.Context) (*App, error) {
 		Engine:          engine,
 		Telegram:        tgClient,
 		DecisionLogs:    decArtifacts.store,
-		Symbols:         syms,
-		Intervals:       profileIntervals,
+		Symbols:         profiles.symbols,
+		Intervals:       profiles.intervals,
 		HorizonName:     cfg.AI.ActiveHorizon,
-		HorizonSummary:  hSummary,
+		HorizonSummary:  profiles.summary,
 		WarmupSummary:   warmupSummary,
 		ExecManager:     freqManager,
 		VisionReady:     visionReady,
 		ProfileManager:  profileMgr,
 		ExitPlans:       exitRegistry,
 		PlanHandlers:    planHandlers,
-		StrategyStore:   strategyStore,
+		StrategyStore:   stores.strategyStore,
 		ExitPlanPrompts: exitPromptIndex,
 	})
 
@@ -293,7 +185,7 @@ func (b *AppBuilder) Build(ctx context.Context) (*App, error) {
 	if freqManager != nil {
 		freqHandler = liveSvc
 	}
-	liveHTTPServe, err := b.liveHTTPFn(cfg.App, decArtifacts.store, freqHandler, syms, convertSymbolDetails(symbolDetails))
+	liveHTTPServe, err := b.liveHTTPFn(cfg.App, decArtifacts.store, freqHandler, profiles.symbols, convertSymbolDetails(symbolDetails))
 	if err != nil {
 		return nil, err
 	}
@@ -314,8 +206,8 @@ func (b *AppBuilder) Build(ctx context.Context) (*App, error) {
 		metricsSvc: metricsSvc,
 		Summary: &StartupSummary{
 			KLine: KLineSummary{
-				Symbols:   syms,
-				Intervals: profileIntervals,
+				Symbols:   profiles.symbols,
+				Intervals: profiles.intervals,
 				MaxCached: cfg.Kline.MaxCached,
 			},
 			EMA:           emaSummary,
@@ -323,6 +215,163 @@ func (b *AppBuilder) Build(ctx context.Context) (*App, error) {
 			SymbolDetails: symbolDetails,
 		},
 	}, nil
+}
+
+type profileSetup struct {
+	loader            *cfgloader.ProfileLoader
+	snapshot          cfgloader.ProfileSnapshot
+	symbols           []string
+	intervals         []string
+	lookbacks         map[string]int
+	derivativeSymbols []string
+	summary           string
+}
+
+func (b *AppBuilder) loadProfileSetup(cfg *brcfg.Config) (profileSetup, error) {
+	if strings.TrimSpace(cfg.AI.ProfilesPath) == "" {
+		return profileSetup{}, fmt.Errorf("ai.profiles_path 未配置，无法加载 profile")
+	}
+	profileLoader, err := cfgloader.NewProfileLoader(cfg.AI.ProfilesPath)
+	if err != nil {
+		return profileSetup{}, fmt.Errorf("加载 profile 配置失败: %w", err)
+	}
+	snapshot := profileLoader.Snapshot()
+	syms, intervals, lookbacks, derivativeSymbols, err := collectProfileUniverse(snapshot, cfg.Kline.MaxCached)
+	if err != nil {
+		return profileSetup{}, err
+	}
+	return profileSetup{
+		loader:            profileLoader,
+		snapshot:          snapshot,
+		symbols:           syms,
+		intervals:         intervals,
+		lookbacks:         lookbacks,
+		derivativeSymbols: derivativeSymbols,
+		summary:           formatProfileSummary(syms, intervals),
+	}, nil
+}
+
+func (b *AppBuilder) loadPromptSetup(cfg *brcfg.Config, snapshot cfgloader.ProfileSnapshot) (*strategy.Manager, profile.PromptLoader, error) {
+	pm, err := b.promptManagerFn(cfg.Prompt.Dir)
+	if err != nil {
+		return nil, nil, fmt.Errorf("加载提示词模板失败: %w", err)
+	}
+	if content, ok := pm.Get(cfg.Prompt.SystemTemplate); ok {
+		logger.Infof("✓ 提示词模板 '%s' 已就绪，长度=%d 字符", cfg.Prompt.SystemTemplate, len(content))
+	} else {
+		logger.Warnf("未找到提示词模板 '%s'", cfg.Prompt.SystemTemplate)
+	}
+
+	var promptLoader profile.PromptLoader
+	if pm != nil {
+		promptLoader = profile.NewPromptLoader(pm, ".", cfg.Prompt.Dir)
+	}
+
+	requiredModelIDs, err := enabledFinalModelIDs(cfg.AI)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := validateProfilePrompts(snapshot, promptLoader, requiredModelIDs); err != nil {
+		return nil, nil, err
+	}
+	return pm, promptLoader, nil
+}
+
+type storeSetup struct {
+	strategyStore exit.StrategyStore
+	liveStore     database.LivePositionStore
+	stateStore    store.Store
+	sharedGorm    *gorm.DB
+}
+
+func (b *AppBuilder) resolveStores(cfg *brcfg.Config, decArtifacts *decisionArtifacts) (storeSetup, error) {
+	var out storeSetup
+	if b.strategyStoreOverride != nil {
+		out.strategyStore = b.strategyStoreOverride
+	}
+	if b.liveStoreOverride != nil {
+		out.liveStore = b.liveStoreOverride
+	} else if b.strategyStoreOverride != nil {
+		if ls, ok := out.strategyStore.(database.LivePositionStore); ok {
+			out.liveStore = ls
+		}
+	}
+	if b.newStoreOverride != nil {
+		out.stateStore = b.newStoreOverride
+	}
+	if out.strategyStore != nil && out.liveStore != nil && out.stateStore != nil {
+		return out, nil
+	}
+
+	path := strings.TrimSpace(cfg.AI.DecisionLogPath)
+	if path == "" {
+		return storeSetup{}, fmt.Errorf("ai.decision_log_path 未配置，无法初始化存储")
+	}
+	gormStore, err := gormstore.NewGormStore(path)
+	if err != nil {
+		return storeSetup{}, fmt.Errorf("初始化 gorm 存储失败: %w", err)
+	}
+	out.strategyStore = gormStore
+	out.liveStore = gormStore
+	out.sharedGorm = gormStore.GormDB()
+
+	if decArtifacts != nil && decArtifacts.store != nil {
+		sqlDB, err := gormStore.SQLDB()
+		if err != nil {
+			return storeSetup{}, fmt.Errorf("获取 SQL DB 失败: %w", err)
+		}
+		if err := decArtifacts.store.UseExternalDB(sqlDB); err != nil {
+			return storeSetup{}, fmt.Errorf("绑定决策日志存储失败: %w", err)
+		}
+	}
+
+	if out.stateStore == nil {
+		if out.sharedGorm != nil {
+			ns, err := sqlite.NewSqliteStoreFromDB(out.sharedGorm)
+			if err != nil {
+				return storeSetup{}, fmt.Errorf("初始化 sqlite 存储失败: %w", err)
+			}
+			out.stateStore = ns
+		} else {
+			ns, err := sqlite.NewSqliteStore(path)
+			if err != nil {
+				return storeSetup{}, fmt.Errorf("初始化 sqlite 存储失败: %w", err)
+			}
+			out.stateStore = ns
+		}
+	}
+	return out, nil
+}
+
+func (b *AppBuilder) buildProfileManager(cfg *brcfg.Config, loader *cfgloader.ProfileLoader, ks market.KlineStore, promptLoader profile.PromptLoader) *profile.Manager {
+	exporter, ok := ks.(store.SnapshotExporter)
+	if !ok {
+		logger.Warnf("K 线存储不支持快照导出，Pipeline 功能被禁用")
+		return nil
+	}
+	pipeFactory := &factory.Factory{Exporter: exporter, DefaultLimit: cfg.Kline.MaxCached}
+	return profile.NewManager(loader, pipeFactory, promptLoader)
+}
+
+func (b *AppBuilder) setupExitPlans(cfg *brcfg.Config, engine *decision.LegacyEngineAdapter, snapshot cfgloader.ProfileSnapshot) (*exitplan.Registry, *exit.HandlerRegistry, map[string]promptkit.ExitPlanPrompt, map[string]SymbolDetail, error) {
+	var exitRegistry *exitplan.Registry
+	if path := strings.TrimSpace(cfg.AI.ExitPlanPath); path != "" {
+		reg, err := exitplan.NewRegistry(path)
+		if err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("加载 exit plan 配置失败: %w", err)
+		}
+		exitRegistry = reg
+		engine.ExitPlans = reg
+	}
+	planHandlers := exit.NewHandlerRegistry()
+	exitHandlers.RegisterCoreHandlers(planHandlers)
+
+	exitPromptIndex := promptkit.BuildPromptsFromCombos(collectProfileCombos(snapshot))
+	if len(exitPromptIndex) == 0 {
+		return nil, nil, nil, nil, fmt.Errorf("profile 未配置 exit_plan 组合，启动中止")
+	}
+	symbolDetails := collectSymbolDetails(snapshot, exitRegistry)
+	return exitRegistry, planHandlers, exitPromptIndex, symbolDetails, nil
 }
 
 func enabledFinalModelIDs(cfg brcfg.AIConfig) ([]string, error) {
@@ -416,7 +465,6 @@ func convertSymbolDetails(src map[string]SymbolDetail) map[string]livehttp.Symbo
 	return out
 }
 
-// WithPromptManager overrides the prompt manager constructor.
 func WithPromptManager(fn func(string) (*strategy.Manager, error)) AppBuilderOption {
 	return func(b *AppBuilder) {
 		if fn != nil {
@@ -425,7 +473,6 @@ func WithPromptManager(fn func(string) (*strategy.Manager, error)) AppBuilderOpt
 	}
 }
 
-// WithMarketStack overrides the market stack builder.
 func WithMarketStack(fn func(context.Context, *brcfg.Config, []string, []string, map[string]int, []string) (*MarketStack, error)) AppBuilderOption {
 	return func(b *AppBuilder) {
 		if fn != nil {
@@ -434,7 +481,6 @@ func WithMarketStack(fn func(context.Context, *brcfg.Config, []string, []string,
 	}
 }
 
-// WithModelProviders overrides the model provider builder.
 func WithModelProviders(fn func(context.Context, brcfg.AIConfig, int) ([]provider.ModelProvider, map[string]bool, bool, error)) AppBuilderOption {
 	return func(b *AppBuilder) {
 		if fn != nil {
@@ -443,7 +489,6 @@ func WithModelProviders(fn func(context.Context, brcfg.AIConfig, int) ([]provide
 	}
 }
 
-// WithDecisionArtifacts overrides the decision artifact loader.
 func WithDecisionArtifacts(fn func(context.Context, brcfg.AIConfig, *decision.LegacyEngineAdapter) (*decisionArtifacts, error)) AppBuilderOption {
 	return func(b *AppBuilder) {
 		if fn != nil {
@@ -452,7 +497,6 @@ func WithDecisionArtifacts(fn func(context.Context, brcfg.AIConfig, *decision.Le
 	}
 }
 
-// WithStorageOverrides allows tests to inject custom stores for strategy/live/state data.
 func WithStorageOverrides(live database.LivePositionStore, strategy exit.StrategyStore, state store.Store) AppBuilderOption {
 	return func(b *AppBuilder) {
 		if live != nil {
@@ -467,7 +511,6 @@ func WithStorageOverrides(live database.LivePositionStore, strategy exit.Strateg
 	}
 }
 
-// WithFreqManager overrides the freqtrade manager builder.
 func WithFreqManager(fn func(brcfg.FreqtradeConfig, string, *database.DecisionLogStore, database.LivePositionStore, store.Store, notifier.TextNotifier) (*freqexec.Manager, error)) AppBuilderOption {
 	return func(b *AppBuilder) {
 		if fn != nil {
@@ -476,7 +519,6 @@ func WithFreqManager(fn func(brcfg.FreqtradeConfig, string, *database.DecisionLo
 	}
 }
 
-// WithLiveHTTP overrides the live HTTP server builder.
 func WithLiveHTTP(fn func(brcfg.AppConfig, *database.DecisionLogStore, livehttp.FreqtradeWebhookHandler, []string, map[string]livehttp.SymbolDetail) (*livehttp.Server, error)) AppBuilderOption {
 	return func(b *AppBuilder) {
 		if fn != nil {

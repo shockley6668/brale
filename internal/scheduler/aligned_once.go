@@ -7,14 +7,8 @@ import (
 	"brale/internal/logger"
 )
 
-// AlignedOnceScheduler aligns the first execution to the next kline close boundary (+Offset),
-// then runs subsequent cycles on a fixed Interval anchored to that first aligned execution.
-//
-// This is useful when you want the bot to start right after a candle close, but then run on your
-// own cadence (e.g., every 10 minutes) without enforcing candle-close alignment for later cycles.
 type AlignedOnceScheduler struct {
-	// Name 用于在日志中区分不同 scheduler（例如按币种分别调度）。
-	Name string
+	Name           string
 	AlignInterval  time.Duration
 	Interval       time.Duration
 	Offset         time.Duration
@@ -24,8 +18,6 @@ type AlignedOnceScheduler struct {
 	nowFn func() time.Time
 }
 
-// NewAlignedOnceScheduler constructs an AlignedOnceScheduler.
-// If ctx is nil, context.Background() is used.
 func NewAlignedOnceScheduler(ctx context.Context, alignInterval, interval, offset time.Duration) *AlignedOnceScheduler {
 	if ctx == nil {
 		ctx = context.Background()
@@ -39,7 +31,6 @@ func NewAlignedOnceScheduler(ctx context.Context, alignInterval, interval, offse
 	}
 }
 
-// Start runs task in a blocking loop until ctx is done.
 func (s *AlignedOnceScheduler) Start(task func()) {
 	if s == nil {
 		return
@@ -80,7 +71,6 @@ func (s *AlignedOnceScheduler) Start(task func()) {
 		task()
 	}
 
-	// First alignment: align to next close + offset.
 	now := s.nowFn().UTC()
 	nextClose := now.Truncate(s.AlignInterval).Add(s.AlignInterval)
 	firstAt := nextClose.Add(s.Offset)

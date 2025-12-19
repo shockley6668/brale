@@ -6,20 +6,17 @@ import (
 	"sync"
 )
 
-// HandlerRegistry 维护所有注册的 PlanHandler。
 type HandlerRegistry struct {
 	mu       sync.RWMutex
 	handlers map[string]PlanHandler
 }
 
-// NewHandlerRegistry 构造空 registry。
 func NewHandlerRegistry() *HandlerRegistry {
 	return &HandlerRegistry{
 		handlers: make(map[string]PlanHandler),
 	}
 }
 
-// Register 将 handler 放入 registry，若 ID 重复则覆盖。
 func (r *HandlerRegistry) Register(h PlanHandler) {
 	if r == nil || h == nil {
 		return
@@ -33,7 +30,6 @@ func (r *HandlerRegistry) Register(h PlanHandler) {
 	r.handlers[id] = h
 }
 
-// Handler 返回指定 ID 对应的 PlanHandler。
 func (r *HandlerRegistry) Handler(id string) (PlanHandler, bool) {
 	if r == nil {
 		return nil, false
@@ -44,7 +40,6 @@ func (r *HandlerRegistry) Handler(id string) (PlanHandler, bool) {
 	return h, ok
 }
 
-// MustHandler 获取 handler，若不存在则 panic。
 func (r *HandlerRegistry) MustHandler(id string) PlanHandler {
 	if h, ok := r.Handler(id); ok {
 		return h
@@ -52,7 +47,6 @@ func (r *HandlerRegistry) MustHandler(id string) PlanHandler {
 	panic(fmt.Sprintf("exit handler 未注册: %s", id))
 }
 
-// Handlers 返回所有已注册 handler（只读切片）。
 func (r *HandlerRegistry) Handlers() []PlanHandler {
 	if r == nil {
 		return nil

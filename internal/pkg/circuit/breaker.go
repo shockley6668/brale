@@ -6,13 +6,12 @@ import (
 	"time"
 )
 
-// State defines the circuit breaker state
 type State int
 
 const (
-	StateClosed   State = iota // Normal operation
-	StateOpen                  // Circuit is open (failing)
-	StateHalfOpen              // Recovering, testing if service is back
+	StateClosed State = iota
+	StateOpen
+	StateHalfOpen
 )
 
 func (s State) String() string {
@@ -28,7 +27,6 @@ func (s State) String() string {
 	}
 }
 
-// CircuitBreaker implements a simple state machine to prevent cascading failures.
 type CircuitBreaker struct {
 	mu            sync.Mutex
 	state         State
@@ -40,7 +38,6 @@ type CircuitBreaker struct {
 	onStateChange func(name string, from, to State)
 }
 
-// NewCircuitBreaker creates a new circuit breaker.
 func NewCircuitBreaker(name string, threshold int, timeout time.Duration) *CircuitBreaker {
 	return &CircuitBreaker{
 		name:      name,
@@ -50,48 +47,43 @@ func NewCircuitBreaker(name string, threshold int, timeout time.Duration) *Circu
 	}
 }
 
-// SetStateChangeHandler sets a callback for state changes.
 func (cb *CircuitBreaker) SetStateChangeHandler(handler func(name string, from, to State)) {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
 	cb.onStateChange = handler
 }
 
-// Allow limits whether execution should proceed.
 func (cb *CircuitBreaker) Allow() bool {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
 
-	if cb.state == StateClosed {
+	switch cb.state {
+	case StateClosed:
 		return true
-	}
-
-	if cb.state == StateOpen {
+	case StateOpen:
 		if time.Since(cb.lastFailure) > cb.timeout {
 			cb.transition(StateHalfOpen)
 			return true
 		}
 		return false
+	default:
+		return true
 	}
-
-	// Half-Open: Allow one request to probe
-	return true
 }
 
-// RecordSuccess should be called when an operation succeeds.
 func (cb *CircuitBreaker) RecordSuccess() {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
 
-	if cb.state == StateHalfOpen {
+	switch cb.state {
+	case StateHalfOpen:
 		cb.transition(StateClosed)
 		cb.failures = 0
-	} else if cb.state == StateClosed {
+	case StateClosed:
 		cb.failures = 0
 	}
 }
 
-// RecordFailure should be called when an operation fails.
 func (cb *CircuitBreaker) RecordFailure() {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
@@ -99,11 +91,12 @@ func (cb *CircuitBreaker) RecordFailure() {
 	cb.failures++
 	cb.lastFailure = time.Now()
 
-	if cb.state == StateClosed {
+	switch cb.state {
+	case StateClosed:
 		if cb.failures >= cb.threshold {
 			cb.transition(StateOpen)
 		}
-	} else if cb.state == StateHalfOpen {
+	case StateHalfOpen:
 		cb.transition(StateOpen)
 	}
 }

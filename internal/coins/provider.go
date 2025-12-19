@@ -11,13 +11,11 @@ import (
 	"time"
 )
 
-// SymbolProvider 币种来源接口
 type SymbolProvider interface {
 	List(ctx context.Context) ([]string, error)
 	Name() string
 }
 
-// NormalizeSymbols 标准化币种列表：去重、转大写、添加 USDT 后缀
 func NormalizeSymbols(symbols []string) ([]string, error) {
 	if len(symbols) == 0 {
 		return nil, errors.New("symbol list is empty")
@@ -44,7 +42,6 @@ func NormalizeSymbols(symbols []string) ([]string, error) {
 	return out, nil
 }
 
-// DefaultSymbolProvider 默认实现：静态列表
 type DefaultSymbolProvider struct{ symbols []string }
 
 func NewDefaultProvider(symbols []string) *DefaultSymbolProvider {
@@ -57,7 +54,6 @@ func (p *DefaultSymbolProvider) List(_ context.Context) ([]string, error) {
 	return NormalizeSymbols(p.symbols)
 }
 
-// HTTPSymbolProvider 从自定义 API 拉取币种列表
 type HTTPSymbolProvider struct {
 	URL    string
 	Client *http.Client
@@ -83,25 +79,24 @@ func (p *HTTPSymbolProvider) List(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("fetching symbols: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode/100 != 2 {
 		return nil, fmt.Errorf("HTTP status %d", resp.StatusCode)
 	}
 
-	// 一次性读取响应体，避免重复请求
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("reading response: %w", err)
 	}
 
-	// 尝试数组格式: ["BTCUSDT", "ETHUSDT"]
 	var arr []string
 	if err := json.Unmarshal(body, &arr); err == nil {
 		return NormalizeSymbols(arr)
 	}
 
-	// 尝试对象格式: {"symbols": ["BTCUSDT", "ETHUSDT"]}
 	var obj struct {
 		Symbols []string `json:"symbols"`
 	}

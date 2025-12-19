@@ -688,6 +688,27 @@
         return { systemPrompt: '', userPrompt: '' };
       });
 
+      const providerPromptBlocks = computed(() => {
+        const stageFilter = (decisionFilters.stage || 'all').toLowerCase();
+        if (stageFilter !== 'provider') return [];
+        const steps = rawDecisionSteps.value || [];
+        const blocks = [];
+        const seen = new Set();
+        steps.forEach((step) => {
+          if (!step) return;
+          const pid = (step.provider_id || '').toString().trim();
+          if (!pid || seen.has(pid)) return;
+          seen.add(pid);
+          blocks.push({
+            providerId: pid,
+            systemPrompt: (step.system_prompt || '').toString(),
+            userPrompt: (step.user_prompt || '').toString(),
+          });
+        });
+        blocks.sort((a, b) => (a.providerId || '').localeCompare(b.providerId || ''));
+        return blocks;
+      });
+
       const stepExpandAvailable = computed(
         () => isMobile.value && rawDecisionSteps.value.length > mobileStepLimit,
       );
@@ -1394,6 +1415,8 @@
 
       const csvBlockKey = (step, idx, tag) => `${step.stage || 'stage'}-${step.ts || idx}-${tag || idx}`;
       const sharedCsvBlockKey = (idx, tag) => `shared-${decisionDetail.id || '0'}-${idx}-${tag || idx}`;
+      const providerCsvBlockKey = (providerId, idx, tag) =>
+        `provider-prompt-${providerId || 'unknown'}-${decisionDetail.id || '0'}-${idx}-${tag || idx}`;
       const isCsvExpanded = (key) => !!csvCollapse[key];
       const toggleCsvBlock = (key) => {
         csvCollapse[key] = !csvCollapse[key];
@@ -2649,6 +2672,7 @@
         decisionProviders,
         filteredDecisionSteps,
         sharedPrompts,
+        providerPromptBlocks,
         positionDetail,
         logs,
         manualOpen,
@@ -2707,6 +2731,7 @@
         mergedAgentPrompt,
         csvBlockKey,
         sharedCsvBlockKey,
+        providerCsvBlockKey,
         isCsvExpanded,
         toggleCsvBlock,
         setStageFilter: (val) => {

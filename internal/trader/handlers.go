@@ -13,13 +13,10 @@ import (
 	"brale/internal/logger"
 )
 
-// handleSignalEntry processes an entry signal asynchronously.
-// It validation logic runs in actor loop, but execution runs in background.
 func (t *Trader) handleSignalEntry(payload json.RawMessage, traceID string) error {
 	var sp SignalEntryPayload
 	var input exchange.OpenRequest
 
-	// Parsing logic
 	if err := json.Unmarshal(payload, &sp); err == nil && sp.Order.Symbol != "" {
 		input = sp.Order
 	} else {
@@ -30,15 +27,13 @@ func (t *Trader) handleSignalEntry(payload json.RawMessage, traceID string) erro
 
 	logger.Infof("Trader handling signal entry for %s %s (async)", input.Symbol, input.Side)
 
-	// Idempotency check (simple version)
 	if _, exists := t.state.Positions[input.Symbol]; exists {
 		logger.Warnf("Position already exists for %s, ignoring entry signal", input.Symbol)
 		return nil
 	}
 
-	// Async Execution
 	go func() {
-		// Context with timeout for execution
+
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
@@ -65,21 +60,21 @@ func (t *Trader) handleSignalEntry(payload json.RawMessage, traceID string) erro
 			res.Error = err.Error()
 		}
 
-		// Send result back to Actor
 		payloadBytes, _ := json.Marshal(res)
-		t.Send(EventEnvelope{
+		if err := t.Send(EventEnvelope{
 			ID:        newEventID("order-result"),
 			Type:      EvtOrderResult,
 			Payload:   payloadBytes,
 			CreatedAt: time.Now(),
 			Symbol:    normalizeSymbol(input.Symbol),
-		})
+		}); err != nil {
+			logger.Warnf("Trader: send order-result failed: %v", err)
+		}
 	}()
 
 	return nil
 }
 
-// applyPositionOpening persists an entry order that is not fully filled yet.
 func (t *Trader) applyPositionOpening(payload json.RawMessage) error {
 	var p PositionOpeningPayload
 	if err := json.Unmarshal(payload, &p); err != nil {
@@ -136,8 +131,6 @@ func (t *Trader) applyPositionOpening(payload json.RawMessage) error {
 	return nil
 }
 
-// applyPositionOpened updates the memory state from a facts payload.
-// This is used by both normal execution and replay.
 func (t *Trader) applyPositionOpened(payload json.RawMessage) error {
 	var p PositionOpenedPayload
 	if err := json.Unmarshal(payload, &p); err != nil {
@@ -148,71 +141,93 @@ func (t *Trader) applyPositionOpened(payload json.RawMessage) error {
 		return fmt.Errorf("position_opened missing symbol")
 	}
 
-	openedAt := p.OpenedAt
-	if openedAt.IsZero() {
-		openedAt = time.Now()
-	}
-
+	openedAt := defaultTime(p.OpenedAt)
 	side := strings.ToLower(strings.TrimSpace(p.Side))
-	tradeID := 0
-	if strings.TrimSpace(p.TradeID) != "" {
-		if id, err := strconv.Atoi(strings.TrimSpace(p.TradeID)); err == nil {
-			tradeID = id
-		} else {
-			logger.Warnf("TradeID %s is not numeric, skipping DB mapping", p.TradeID)
-		}
-	}
+	tradeID := parseTradeIDSafe(p.TradeID)
 
-	// Persist first to guarantee disk success before touching memory state.
 	if t.posStore != nil && tradeID > 0 {
-		ctx := context.Background()
-		var rec database.LiveOrderRecord
-		if prev, ok, err := t.posStore.GetLivePosition(ctx, tradeID); err != nil {
-			logger.Warnf("failed to load previous position record trade=%d symbol=%s: %v", tradeID, symbol, err)
-		} else if ok {
-			rec = prev
-		}
-
-		rec.FreqtradeID = tradeID
-		rec.Symbol = symbol
-		rec.Side = side
-		rec.Status = database.LiveOrderStatusOpen
-		rec.StartTime = &openedAt
-
-		if p.Amount > 0 {
-			amount := p.Amount
-			rec.Amount = &amount
-			if rec.InitialAmount == nil || *rec.InitialAmount <= 0 {
-				rec.InitialAmount = &amount
-			}
-		}
-		if p.Price > 0 {
-			price := p.Price
-			rec.Price = &price
-		}
-		if p.Stake > 0 {
-			stake := p.Stake
-			rec.StakeAmount = &stake
-			if rec.PositionValue == nil || *rec.PositionValue <= 0 {
-				rec.PositionValue = &stake
-			}
-		}
-		if p.Leverage > 0 {
-			lev := p.Leverage
-			rec.Leverage = &lev
-		}
-
-		if rec.CreatedAt.IsZero() {
-			rec.CreatedAt = openedAt
-		}
-		rec.UpdatedAt = openedAt
-
-		if err := t.posStore.UpsertLiveOrder(ctx, rec); err != nil {
-			return fmt.Errorf("failed to persist position to DB for %s: %w", symbol, err)
+		if err := t.upsertOpenedPositionDB(symbol, side, openedAt, tradeID, p); err != nil {
+			return err
 		}
 	}
 
-	// Update State
+	t.updateOpenedPositionState(symbol, side, openedAt, p)
+	if p.TradeID != "" {
+		t.state.ByTradeID[p.TradeID] = symbol
+		t.state.SymbolIndex[symbol] = p.TradeID
+	}
+
+	t.refreshSnapshot(true)
+
+	logger.Infof("State Updated: Position opened for %s (ID: %s)", symbol, p.TradeID)
+	return nil
+}
+
+func defaultTime(t time.Time) time.Time {
+	if t.IsZero() {
+		return time.Now()
+	}
+	return t
+}
+
+func parseTradeIDSafe(raw string) int {
+	if strings.TrimSpace(raw) == "" {
+		return 0
+	}
+	if id, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil {
+		return id
+	}
+	logger.Warnf("TradeID %s is not numeric, skipping DB mapping", raw)
+	return 0
+}
+
+// upsertOpenedPositionDB ensures the DB row exists and is populated.
+// This keeps historical fills coherent even if websockets were missed earlier.
+func (t *Trader) upsertOpenedPositionDB(symbol, side string, openedAt time.Time, tradeID int, p PositionOpenedPayload) error {
+	ctx := context.Background()
+	var rec database.LiveOrderRecord
+	if prev, ok, err := t.posStore.GetLivePosition(ctx, tradeID); err != nil {
+		logger.Warnf("failed to load previous position record trade=%d symbol=%s: %v", tradeID, symbol, err)
+	} else if ok {
+		rec = prev
+	}
+
+	rec.FreqtradeID = tradeID
+	rec.Symbol = symbol
+	rec.Side = side
+	rec.Status = database.LiveOrderStatusOpen
+	rec.StartTime = &openedAt
+
+	if p.Amount > 0 {
+		rec.Amount = ptrFloat(p.Amount)
+		if rec.InitialAmount == nil || *rec.InitialAmount <= 0 {
+			rec.InitialAmount = ptrFloat(p.Amount)
+		}
+	}
+	if p.Price > 0 {
+		rec.Price = ptrFloat(p.Price)
+	}
+	if p.Stake > 0 {
+		rec.StakeAmount = ptrFloat(p.Stake)
+		if rec.PositionValue == nil || *rec.PositionValue <= 0 {
+			rec.PositionValue = ptrFloat(p.Stake)
+		}
+	}
+	if p.Leverage > 0 {
+		rec.Leverage = ptrFloat(p.Leverage)
+	}
+	if rec.CreatedAt.IsZero() {
+		rec.CreatedAt = openedAt
+	}
+	rec.UpdatedAt = openedAt
+
+	if err := t.posStore.UpsertLiveOrder(ctx, rec); err != nil {
+		return fmt.Errorf("failed to persist position to DB for %s: %w", symbol, err)
+	}
+	return nil
+}
+
+func (t *Trader) updateOpenedPositionState(symbol, side string, openedAt time.Time, p PositionOpenedPayload) {
 	pos := &exchange.Position{
 		ID:            strings.TrimSpace(p.TradeID),
 		Symbol:        symbol,
@@ -227,20 +242,10 @@ func (t *Trader) applyPositionOpened(payload json.RawMessage) error {
 		IsOpen:        true,
 	}
 	t.state.Positions[symbol] = pos
-
-	// Update Index
-	if p.TradeID != "" {
-		t.state.ByTradeID[p.TradeID] = symbol
-		t.state.SymbolIndex[symbol] = p.TradeID
-	}
-
-	t.refreshSnapshot(true)
-
-	logger.Infof("State Updated: Position opened for %s (ID: %s)", symbol, p.TradeID)
-	return nil
 }
 
-// applyPositionClosing updates state when exit order is submitted.
+func ptrFloat(v float64) *float64 { return &v }
+
 func (t *Trader) applyPositionClosing(payload json.RawMessage) error {
 	var p PositionClosingPayload
 	if err := json.Unmarshal(payload, &p); err != nil {
@@ -256,7 +261,6 @@ func (t *Trader) applyPositionClosing(payload json.RawMessage) error {
 	return nil
 }
 
-// applyPositionClosed updates memory and DB for a closed trade fact.
 func (t *Trader) applyPositionClosed(payload json.RawMessage) error {
 	var p PositionClosedPayload
 	if err := json.Unmarshal(payload, &p); err != nil {

@@ -18,7 +18,6 @@ import (
 	"brale/internal/pkg/convert"
 )
 
-// Client wraps Freqtrade REST API interactions required by Brale.
 type Client struct {
 	baseURL    *url.URL
 	httpClient *http.Client
@@ -34,7 +33,6 @@ const (
 
 var errTradeNotFound = errors.New("freqtrade trade not found")
 
-// NewClient constructs a Freqtrade client from configuration.
 func NewClient(cfg brconfig.FreqtradeConfig) (*Client, error) {
 	if !cfg.Enabled {
 		return nil, fmt.Errorf("freqtrade 未启用")
@@ -54,9 +52,9 @@ func NewClient(cfg brconfig.FreqtradeConfig) (*Client, error) {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	if cfg.InsecureSkipVerify {
 		if transport.TLSClientConfig == nil {
-			transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} // #nosec G402
+			transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 		} else {
-			transport.TLSClientConfig.InsecureSkipVerify = true // #nosec G402
+			transport.TLSClientConfig.InsecureSkipVerify = true
 		}
 	}
 	httpClient := &http.Client{
@@ -72,12 +70,10 @@ func NewClient(cfg brconfig.FreqtradeConfig) (*Client, error) {
 	}, nil
 }
 
-// SetHTTPClient sets the HTTP client for testing.
 func (c *Client) SetHTTPClient(client *http.Client) {
 	c.httpClient = client
 }
 
-// ForceEnterPayload mirrors freqtrade's /forceenter schema.
 type ForceEnterPayload struct {
 	Pair        string   `json:"pair"`
 	Side        string   `json:"side"`
@@ -88,19 +84,16 @@ type ForceEnterPayload struct {
 	Leverage    float64  `json:"leverage,omitempty"`
 }
 
-// ForceEnterResponse contains trade identifier returned by freqtrade.
 type ForceEnterResponse struct {
 	TradeID int `json:"trade_id"`
 }
 
-// ForceExitPayload mirrors freqtrade's /forceexit schema.
 type ForceExitPayload struct {
 	TradeID   string  `json:"tradeid"`
 	OrderType string  `json:"ordertype,omitempty"`
 	Amount    float64 `json:"amount,omitempty"`
 }
 
-// ForceEnter creates a new trade via freqtrade.
 func (c *Client) ForceEnter(ctx context.Context, payload ForceEnterPayload) (*ForceEnterResponse, error) {
 	var resp ForceEnterResponse
 	if err := c.doRequest(ctx, http.MethodPost, "/forceenter", payload, &resp); err != nil {
@@ -112,12 +105,10 @@ func (c *Client) ForceEnter(ctx context.Context, payload ForceEnterPayload) (*Fo
 	return &resp, nil
 }
 
-// ForceExit partially or fully closes an existing trade.
 func (c *Client) ForceExit(ctx context.Context, payload ForceExitPayload) error {
 	return c.doRequest(ctx, http.MethodPost, "/forceexit", payload, nil)
 }
 
-// Trade represents a subset of freqtrade trade fields.
 type Trade struct {
 	ID             int     `json:"trade_id"`
 	Pair           string  `json:"pair"`
@@ -138,12 +129,11 @@ type Trade struct {
 	CurrentRate    float64 `json:"current_rate"`
 	CloseProfit    float64 `json:"close_profit"`
 	CloseProfitAbs float64 `json:"close_profit_abs"`
-	// Freqtrade /status 接口对于未平仓订单，往往使用 profit_ratio/profit_abs
+
 	ProfitRatio float64 `json:"profit_ratio"`
 	ProfitAbs   float64 `json:"profit_abs"`
 }
 
-// ListTrades fetches currently open trades from freqtrade (uses /status endpoint).
 func (c *Client) ListTrades(ctx context.Context) ([]Trade, error) {
 	trades, err := c.fetchTrades(ctx, "/status")
 	if err != nil {
@@ -188,7 +178,6 @@ func (c *Client) fetchTrades(ctx context.Context, path string) ([]Trade, error) 
 	}
 }
 
-// GetTrade 查询指定 trade_id 的最新详情（含已平仓记录）。
 func (c *Client) GetTrade(ctx context.Context, tradeID int) (*Trade, error) {
 	if c == nil || c.httpClient == nil {
 		return nil, fmt.Errorf("freqtrade client not initialized")
@@ -208,7 +197,7 @@ func (c *Client) GetTrade(ctx context.Context, tradeID int) (*Trade, error) {
 		}
 		for _, tr := range trades {
 			if tr.ID == tradeID {
-				// 返回拷贝，避免后续遍历修改底层 slice。
+
 				copy := tr
 				return &copy, nil
 			}
@@ -217,7 +206,6 @@ func (c *Client) GetTrade(ctx context.Context, tradeID int) (*Trade, error) {
 	return nil, errTradeNotFound
 }
 
-// GetOpenTrade 查询 /status 中的指定 trade_id。
 func (c *Client) GetOpenTrade(ctx context.Context, tradeID int) (*Trade, error) {
 	if c == nil || c.httpClient == nil {
 		return nil, fmt.Errorf("freqtrade client not initialized")
@@ -251,7 +239,6 @@ func filterOpenTrades(trades []Trade) []Trade {
 	return open
 }
 
-// GetBalance 查询 freqtrade /balance 接口，返回账户权益与可用资金。
 func (c *Client) GetBalance(ctx context.Context) (exchange.Balance, error) {
 	var raw map[string]any
 	if err := c.doRequest(ctx, http.MethodGet, "/balance", nil, &raw); err != nil {
@@ -264,7 +251,7 @@ func (c *Client) GetBalance(ctx context.Context) (exchange.Balance, error) {
 	if v, ok := raw["stake_currency"].(string); ok {
 		b.StakeCurrency = strings.ToUpper(strings.TrimSpace(v))
 	}
-	if v, ok := raw["balance"]; ok { // Total balance
+	if v, ok := raw["balance"]; ok {
 		total := convert.ToFloat64(v)
 		if total > 0 {
 			b.Total = total
@@ -276,12 +263,11 @@ func (c *Client) GetBalance(ctx context.Context) (exchange.Balance, error) {
 		}
 	}
 	if v, ok := raw["available"]; ok {
-		// Generic available
+
 		b.Available = convert.ToFloat64(v)
 	}
 	if v, ok := raw["stake_balance"]; ok {
-		// Freqtrade stake_balance is roughly available stake
-		// If generic available is 0, use this
+
 		s := convert.ToFloat64(v)
 		if b.Available == 0 {
 			b.Available = s

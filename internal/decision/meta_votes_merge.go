@@ -237,4 +237,3 @@ func mergeProviderActionList(dst, src []string) []string {
 	sort.Strings(out)
 	return out
 }
-

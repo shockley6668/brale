@@ -19,7 +19,6 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// DecisionLogStore 管理实盘 AI 决策日志，方便后续排查/可视化。
 type DecisionLogStore struct {
 	mu     sync.Mutex
 	db     *sql.DB
@@ -41,7 +40,6 @@ type agentOutputCacheEntry struct {
 	TS     int64
 }
 
-// DecisionLogRecord 代表一条日志记录，会持久化模型输入/输出摘要。
 type DecisionLogRecord struct {
 	TraceID         string                      `json:"trace_id"`
 	ID              int64                       `json:"id"`
@@ -66,13 +64,11 @@ type DecisionLogRecord struct {
 	Note            string                      `json:"note,omitempty"`
 }
 
-// ImageAttachment 保存注入模型的图像信息（DataURI + 描述）。
 type ImageAttachment struct {
 	DataURI     string `json:"data_uri"`
 	Description string `json:"description,omitempty"`
 }
 
-// LiveDecisionTrace 用于前端展示“决策线”。
 type LiveDecisionTrace struct {
 	TraceID    string             `json:"trace_id"`
 	Timestamp  int64              `json:"ts"`
@@ -83,7 +79,6 @@ type LiveDecisionTrace struct {
 	Steps      []LiveDecisionStep `json:"steps"`
 }
 
-// LiveDecisionStep 描述单次模型请求/响应。
 type LiveDecisionStep struct {
 	Stage           string              `json:"stage"`
 	ProviderID      string              `json:"provider_id"`
@@ -101,7 +96,6 @@ type LiveDecisionStep struct {
 	Note            string              `json:"note,omitempty"`
 }
 
-// LiveOrder 记录实盘执行事件（预留，暂未对外暴露）。
 type LiveOrder struct {
 	ID        int64   `json:"id"`
 	TS        int64   `json:"ts"`
@@ -115,10 +109,7 @@ type LiveOrder struct {
 	CreatedAt int64   `json:"created_at"`
 }
 
-// LivePosition 记录实盘持仓状态（预留，暂未对外暴露）。
-// LiveDecisionQuery 用于筛选实时日志。
 type LiveDecisionQuery struct {
-	// Symbol 为兼容旧逻辑的单选值；若 Symbols 非空则忽略此字段。
 	Symbol   string
 	Symbols  []string
 	Provider string
@@ -127,7 +118,6 @@ type LiveDecisionQuery struct {
 	Offset   int
 }
 
-// NewDecisionLogStore 初始化 SQLite 存储。
 func NewDecisionLogStore(path string) (*DecisionLogStore, error) {
 	if path == "" {
 		return nil, fmt.Errorf("decision log path 不能为空")
@@ -140,10 +130,12 @@ func NewDecisionLogStore(path string) (*DecisionLogStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(2)
+	db.SetMaxOpenConns(4)
 	db.SetMaxIdleConns(2)
 	if err := ensureDecisionLogSchema(db); err != nil {
-		db.Close()
+		if cerr := db.Close(); cerr != nil {
+			logger.Warnf("decision log db close failed: %v", cerr)
+		}
 		return nil, err
 	}
 	return &DecisionLogStore{
@@ -154,7 +146,6 @@ func NewDecisionLogStore(path string) (*DecisionLogStore, error) {
 	}, nil
 }
 
-// UseExternalDB 允许复用外部（例如 GORM）初始化的 SQLite 连接，避免多连接锁冲突。
 func (s *DecisionLogStore) UseExternalDB(db *sql.DB) error {
 	if s == nil {
 		return fmt.Errorf("decision log store 未初始化")
@@ -178,7 +169,6 @@ func (s *DecisionLogStore) UseExternalDB(db *sql.DB) error {
 	return nil
 }
 
-// Close 关闭底层 DB。
 func (s *DecisionLogStore) Close() error {
 	s.agentCacheMu.Lock()
 	s.agentOutputCache = nil
@@ -305,6 +295,7 @@ func ensureDecisionLogSchema(db *sql.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_live_logs_ts ON live_decision_logs(ts);`,
 		`CREATE INDEX IF NOT EXISTS idx_live_logs_provider ON live_decision_logs(provider_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_live_logs_symbol ON live_decision_logs(symbols);`,
+		`CREATE INDEX IF NOT EXISTS idx_live_logs_trace_id ON live_decision_logs(trace_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_live_orders_symbol ON live_orders(symbol);`,
 		`CREATE INDEX IF NOT EXISTS idx_live_orders_status ON live_orders(status);`,
 
@@ -360,7 +351,7 @@ func addColumnIfMissing(db *sql.DB, table, column, typ string) error {
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	exists := false
 	for rows.Next() {
 		var cid int
@@ -383,7 +374,6 @@ func addColumnIfMissing(db *sql.DB, table, column, typ string) error {
 	return err
 }
 
-// Insert 写入一条日志。
 func (s *DecisionLogStore) Insert(ctx context.Context, rec DecisionLogRecord) (int64, error) {
 	s.mu.Lock()
 	db := s.db
@@ -499,7 +489,7 @@ func buildLiveDecisionFilter(q LiveDecisionQuery) (string, []interface{}) {
 	case "core":
 		sb.WriteString(" AND (stage='final' OR stage='provider' OR stage LIKE 'agent:%')")
 	case "all":
-		// no-op
+
 	default:
 		sb.WriteString(" AND stage=?")
 		args = append(args, stage)
@@ -572,7 +562,6 @@ func scanDecisionLogRecord(scanner rowScanner) (DecisionLogRecord, error) {
 	return rec, nil
 }
 
-// GetDecision 根据主键 ID 返回单条实时决策记录。
 func (s *DecisionLogStore) GetDecision(ctx context.Context, id int64) (DecisionLogRecord, error) {
 	var rec DecisionLogRecord
 	if id <= 0 {
@@ -591,7 +580,6 @@ func (s *DecisionLogStore) GetDecision(ctx context.Context, id int64) (DecisionL
 	return scanDecisionLogRecord(row)
 }
 
-// ListDecisions 返回最新的实时决策日志，支持按 provider/stage/symbol 过滤。
 func (s *DecisionLogStore) ListDecisions(ctx context.Context, q LiveDecisionQuery) ([]DecisionLogRecord, error) {
 	s.mu.Lock()
 	db := s.db
@@ -620,7 +608,7 @@ func (s *DecisionLogStore) ListDecisions(ctx context.Context, q LiveDecisionQuer
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var list []DecisionLogRecord
 	for rows.Next() {
 		rec, err := scanDecisionLogRecord(rows)
@@ -632,7 +620,6 @@ func (s *DecisionLogStore) ListDecisions(ctx context.Context, q LiveDecisionQuer
 	return list, rows.Err()
 }
 
-// CountDecisions 统计满足筛选条件的决策日志数量。
 func (s *DecisionLogStore) CountDecisions(ctx context.Context, q LiveDecisionQuery) (int, error) {
 	s.mu.Lock()
 	db := s.db
@@ -648,7 +635,6 @@ func (s *DecisionLogStore) CountDecisions(ctx context.Context, q LiveDecisionQue
 	return total, nil
 }
 
-// ListDecisionsByTraceID 返回同一 trace 下的所有决策步骤，按时间顺序排列。
 func (s *DecisionLogStore) ListDecisionsByTraceID(ctx context.Context, traceID string, limit int) ([]DecisionLogRecord, error) {
 	traceID = strings.TrimSpace(traceID)
 	if traceID == "" {
@@ -672,7 +658,7 @@ func (s *DecisionLogStore) ListDecisionsByTraceID(ctx context.Context, traceID s
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var list []DecisionLogRecord
 	for rows.Next() {
 		rec, err := scanDecisionLogRecord(rows)
@@ -684,8 +670,6 @@ func (s *DecisionLogStore) ListDecisionsByTraceID(ctx context.Context, traceID s
 	return list, rows.Err()
 }
 
-// LatestAgentOutput returns the latest output text for a specific agent (symbol + stage + provider),
-// used to inject "previous round agent output" into the next LLM prompt.
 func (s *DecisionLogStore) LatestAgentOutput(ctx context.Context, symbol, stage, providerID string) (string, error) {
 	if s == nil {
 		return "", fmt.Errorf("decision log store 未初始化")
@@ -751,7 +735,6 @@ func (s *DecisionLogStore) LatestAgentOutput(ctx context.Context, symbol, stage,
 	return out, nil
 }
 
-// ListDecisionsByTraceIDs 在单次查询中取回多个 trace 的日志，按 trace/时间排序。
 func (s *DecisionLogStore) ListDecisionsByTraceIDs(ctx context.Context, traceIDs []string) (map[string][]DecisionLogRecord, error) {
 	clean := normalizeTraceIDs(traceIDs)
 	if len(clean) == 0 {
@@ -779,7 +762,7 @@ func (s *DecisionLogStore) ListDecisionsByTraceIDs(ctx context.Context, traceIDs
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	result := make(map[string][]DecisionLogRecord, len(clean))
 	for rows.Next() {
 		rec, err := scanDecisionLogRecord(rows)
@@ -795,12 +778,10 @@ func (s *DecisionLogStore) ListDecisionsByTraceIDs(ctx context.Context, traceIDs
 	return result, rows.Err()
 }
 
-// DecisionLogObserver 实现 decision.DecisionObserver，将 trace 写入 SQLite。
 type DecisionLogObserver struct {
 	store *DecisionLogStore
 }
 
-// NewDecisionLogObserver 包装 store。
 func NewDecisionLogObserver(store *DecisionLogStore) *DecisionLogObserver {
 	if store == nil {
 		return nil
@@ -808,7 +789,6 @@ func NewDecisionLogObserver(store *DecisionLogStore) *DecisionLogObserver {
 	return &DecisionLogObserver{store: store}
 }
 
-// AfterDecide 记录 provider + final 阶段输出。
 func (o *DecisionLogObserver) AfterDecide(ctx context.Context, trace decision.DecisionTrace) {
 	if o == nil || o.store == nil {
 		return
@@ -828,6 +808,12 @@ func (o *DecisionLogObserver) AfterDecide(ctx context.Context, trace decision.De
 		rec := base
 		rec.ProviderID = out.ProviderID
 		rec.Stage = "provider"
+		if sys := strings.TrimSpace(out.SystemPrompt); sys != "" {
+			rec.System = sys
+		}
+		if usr := strings.TrimSpace(out.UserPrompt); usr != "" {
+			rec.User = usr
+		}
 		rec.RawOutput = out.Raw
 		rec.RawJSON = out.Parsed.RawJSON
 		rec.Meta = out.Parsed.MetaSummary
@@ -854,6 +840,12 @@ func (o *DecisionLogObserver) AfterDecide(ctx context.Context, trace decision.De
 	finalRec.RawOutput = trace.Best.Raw
 	finalRec.RawJSON = trace.Best.Parsed.RawJSON
 	finalRec.Meta = trace.Best.Parsed.MetaSummary
+	if sys := strings.TrimSpace(trace.Best.SystemPrompt); sys != "" {
+		finalRec.System = sys
+	}
+	if usr := strings.TrimSpace(trace.Best.UserPrompt); usr != "" {
+		finalRec.User = usr
+	}
 	finalRec.Decisions = append([]decision.Decision(nil), trace.Best.Parsed.Decisions...)
 	finalRec.Symbols = mergeSymbolLists(collectSymbols(finalRec.Decisions), candidateSymbols)
 	finalRec.Images = attachmentsFromProviderImages(trace.Best.Images)
@@ -897,7 +889,6 @@ func (o *DecisionLogObserver) AfterDecide(ctx context.Context, trace decision.De
 	}
 }
 
-// BuildLiveDecisionTraces 将平铺日志转为按 trace_id 分组的决策线。
 func BuildLiveDecisionTraces(records []DecisionLogRecord) []LiveDecisionTrace {
 	if len(records) == 0 {
 		return nil
@@ -994,7 +985,6 @@ func deriveLegacyTraceKey(rec DecisionLogRecord, idx int) string {
 	return fmt.Sprintf("legacy-%d-%s-%s-%d", rec.Timestamp, rec.Horizon, symbolBlob, suffix)
 }
 
-// DecisionRoundSummary 汇总一次决策轮次的关键指标，供前端列表展示。
 type DecisionRoundSummary struct {
 	TraceID       string              `json:"trace_id"`
 	RoundKey      string              `json:"round_key"`
@@ -1013,7 +1003,6 @@ type DecisionRoundSummary struct {
 	Steps         []DecisionLogRecord `json:"steps,omitempty"`
 }
 
-// BuildDecisionRoundSummaries 根据 final 记录与 trace 下的全量日志在 Go 层聚合出轮次摘要。
 func BuildDecisionRoundSummaries(finals []DecisionLogRecord, traceLogs map[string][]DecisionLogRecord) []DecisionRoundSummary {
 	if len(finals) == 0 {
 		return nil

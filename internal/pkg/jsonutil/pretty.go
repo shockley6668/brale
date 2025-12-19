@@ -5,7 +5,6 @@ import (
 	"strings"
 )
 
-// Pretty formats JSON string with indentation; returns original on error.
 func Pretty(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

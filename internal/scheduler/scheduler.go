@@ -7,8 +7,6 @@ import (
 	"brale/internal/logger"
 )
 
-// AlignedScheduler triggers a task right after a candle close boundary (+Offset),
-// recalculating the next wake time on every loop to avoid drift.
 type AlignedScheduler struct {
 	Interval       time.Duration
 	Offset         time.Duration
@@ -18,8 +16,6 @@ type AlignedScheduler struct {
 	nowFn func() time.Time
 }
 
-// NewAlignedScheduler constructs an AlignedScheduler.
-// If ctx is nil, context.Background() is used.
 func NewAlignedScheduler(ctx context.Context, interval, offset time.Duration) *AlignedScheduler {
 	if ctx == nil {
 		ctx = context.Background()
@@ -32,7 +28,6 @@ func NewAlignedScheduler(ctx context.Context, interval, offset time.Duration) *A
 	}
 }
 
-// Start runs task in a blocking loop until ctx is done.
 func (s *AlignedScheduler) Start(task func()) {
 	if s == nil {
 		return

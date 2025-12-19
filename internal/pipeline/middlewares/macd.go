@@ -12,7 +12,6 @@ import (
 	talib "github.com/markcheno/go-talib"
 )
 
-// MACDConfig 定义 MACD 中间件参数。
 type MACDConfig struct {
 	Name     string
 	Stage    int
@@ -24,7 +23,6 @@ type MACDConfig struct {
 	Signal   int
 }
 
-// MACDMiddleware 将 MACD 输出为特征。
 type MACDMiddleware struct {
 	meta     pipeline.MiddlewareMeta
 	interval string
@@ -33,7 +31,6 @@ type MACDMiddleware struct {
 	signal   int
 }
 
-// NewMACDMiddleware 构造实例。
 func NewMACDMiddleware(cfg MACDConfig) *MACDMiddleware {
 	if cfg.Fast <= 0 {
 		cfg.Fast = 12
@@ -58,10 +55,8 @@ func NewMACDMiddleware(cfg MACDConfig) *MACDMiddleware {
 	}
 }
 
-// Meta 实现接口。
 func (m *MACDMiddleware) Meta() pipeline.MiddlewareMeta { return m.meta }
 
-// Handle 计算 MACD。
 func (m *MACDMiddleware) Handle(ctx context.Context, ac *pipeline.AnalysisContext) error {
 	interval := m.interval
 	if interval == "" {

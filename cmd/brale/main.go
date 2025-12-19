@@ -29,16 +29,24 @@ func main() {
 		log.Fatalf("初始化日志文件失败: %v", err)
 	}
 	if logFile != nil {
-		defer logFile.Close()
+		defer func() {
+			if err := logFile.Close(); err != nil {
+				log.Printf("关闭日志文件失败: %v", err)
+			}
+		}()
 	}
-	logger.SetLLMWriter(nil) // Default to no LLM writer
+	logger.SetLLMWriter(nil)
 	if cfg.App.LLMDump {
 		f, err := setupLLMLogOutput(cfg.App.LLMLog)
 		if err != nil {
 			log.Fatalf("初始化 LLM 日志失败: %v", err)
 		}
 		if f != nil {
-			defer f.Close()
+			defer func() {
+				if err := f.Close(); err != nil {
+					log.Printf("关闭 LLM 日志文件失败: %v", err)
+				}
+			}()
 		}
 	}
 	logger.SetLevel(cfg.App.LogLevel)

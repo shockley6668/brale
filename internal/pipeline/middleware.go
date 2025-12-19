@@ -5,13 +5,11 @@ import (
 	"time"
 )
 
-// Middleware 描述一个特征抽取步骤。
 type Middleware interface {
 	Meta() MiddlewareMeta
 	Handle(ctx context.Context, ac *AnalysisContext) error
 }
 
-// MiddlewareMeta 提供调度所需元信息。
 type MiddlewareMeta struct {
 	Name     string
 	Stage    int
@@ -19,7 +17,6 @@ type MiddlewareMeta struct {
 	Timeout  time.Duration
 }
 
-// MiddlewareError 封装中间件的失败信息。
 type MiddlewareError struct {
 	Middleware string
 	Stage      int

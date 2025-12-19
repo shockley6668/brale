@@ -8,7 +8,6 @@ import (
 	"brale/internal/logger"
 )
 
-// Positions returns active positions for the decision engine.
 func (m *Manager) Positions() []decision.PositionSnapshot {
 	if m.trader != nil {
 		snap := m.trader.Snapshot()

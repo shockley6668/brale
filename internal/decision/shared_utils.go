@@ -11,8 +11,6 @@ import (
 	"brale/internal/pkg/text"
 )
 
-// Shared utilities for decision package to avoid duplication between legacy and standard engines.
-
 type klineWindow struct {
 	Symbol   string
 	Interval string

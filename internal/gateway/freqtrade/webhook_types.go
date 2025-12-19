@@ -7,7 +7,6 @@ import (
 	"strings"
 )
 
-// WebhookMessage represents the JSON payload sent by freqtrade webhooks.
 type WebhookMessage struct {
 	Type        string       `json:"type"`
 	TradeID     numericInt   `json:"trade_id"`
@@ -28,7 +27,6 @@ type WebhookMessage struct {
 	CloseDate   string       `json:"close_date"`
 }
 
-// numericFloat unmarshals freqtrade numbers that may arrive as strings.
 type numericFloat float64
 
 func (f *numericFloat) UnmarshalJSON(data []byte) error {
@@ -62,7 +60,6 @@ func (f *numericFloat) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// numericInt unmarshals freqtrade integers that may arrive as strings.
 type numericInt int64
 
 func (i *numericInt) UnmarshalJSON(data []byte) error {

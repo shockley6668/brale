@@ -10,7 +10,6 @@ import (
 	"brale/internal/store"
 )
 
-// CandleFetcherConfig 控制 k 线抓取。
 type CandleFetcherConfig struct {
 	Name      string
 	Stage     int
@@ -20,7 +19,6 @@ type CandleFetcherConfig struct {
 	Limit     int
 }
 
-// CandleFetcher 将指定周期的 K 线写入 AnalysisContext。
 type CandleFetcher struct {
 	meta      pipeline.MiddlewareMeta
 	exporter  store.SnapshotExporter
@@ -28,7 +26,6 @@ type CandleFetcher struct {
 	limit     int
 }
 
-// NewCandleFetcher 构造中间件。
 func NewCandleFetcher(cfg CandleFetcherConfig, exporter store.SnapshotExporter) *CandleFetcher {
 	if cfg.Limit <= 0 {
 		cfg.Limit = 240
@@ -46,10 +43,8 @@ func NewCandleFetcher(cfg CandleFetcherConfig, exporter store.SnapshotExporter) 
 	}
 }
 
-// Meta 实现 pipeline.Middleware。
 func (c *CandleFetcher) Meta() pipeline.MiddlewareMeta { return c.meta }
 
-// Handle 拉取数据。
 func (c *CandleFetcher) Handle(ctx context.Context, ac *pipeline.AnalysisContext) error {
 	if c.exporter == nil {
 		return fmt.Errorf("kline exporter unavailable")

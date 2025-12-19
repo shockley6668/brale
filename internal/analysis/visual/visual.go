@@ -23,7 +23,6 @@ import (
 	"brale/internal/market"
 )
 
-// ImageResult 封装 PNG 字节与描述。
 type ImageResult struct {
 	Bytes       []byte `json:"-"`
 	Base64      string `json:"base64"`
@@ -31,7 +30,6 @@ type ImageResult struct {
 	Description string `json:"description"`
 }
 
-// DataURI 返回 data:image/png;base64,... 形式。
 func (r *ImageResult) DataURI() string {
 	if r == nil {
 		return ""
@@ -45,7 +43,6 @@ func (r *ImageResult) DataURI() string {
 	return "data:image/png;base64," + r.Base64
 }
 
-// CompositeInput 描述 ECharts 渲染所需的全部材料。
 type CompositeInput struct {
 	Context    context.Context
 	Symbol     string
@@ -75,7 +72,6 @@ const (
 	macdHeightPx   = 260
 )
 
-// RenderComposite 生成多周期、带指标/注释的 PNG。
 func RenderComposite(input CompositeInput) (ImageResult, error) {
 	if err := EnsureHeadlessAvailable(input.Context); err != nil {
 		return ImageResult{}, err
@@ -113,7 +109,6 @@ var (
 	headlessErr  error
 )
 
-// EnsureHeadlessAvailable 保证在程序启动阶段就检测 headless Chrome，可用于启动过程的硬性检查。
 func EnsureHeadlessAvailable(ctx context.Context) error {
 	headlessOnce.Do(func() {
 		targetCtx := ctx
@@ -156,8 +151,8 @@ func buildCompositeHTML(input CompositeInput) ([]byte, string, error) {
 			Height:          fmt.Sprintf("%dpx", klineHeightPx),
 			BackgroundColor: colorBackground,
 		}
-	kline := charts.NewKLine()
-	kline.SetGlobalOptions(
+		kline := charts.NewKLine()
+		kline.SetGlobalOptions(
 			charts.WithInitializationOpts(init),
 			charts.WithLegendOpts(opts.Legend{Show: opts.Bool(true), TextStyle: &opts.TextStyle{Color: colorTextPrimary}}),
 			charts.WithTitleOpts(opts.Title{
@@ -201,8 +196,8 @@ func buildCompositeHTML(input CompositeInput) ([]byte, string, error) {
 		emaLine.SetXAxis(xAxis)
 		kline.Overlap(emaLine)
 
-	volume := buildVolumeChart(interval, xAxis, candles)
-	macdChart := buildMACDChart(interval, xAxis, candles)
+		volume := buildVolumeChart(interval, xAxis, candles)
+		macdChart := buildMACDChart(interval, xAxis, candles)
 
 		page.AddCharts(kline, volume, macdChart)
 	}

@@ -1,56 +1,70 @@
+# profiles.yaml：运行配置（币种/周期/指标中间件/prompt/exit_plan 组合）
+# 结构说明：
+# - profiles: 下每个 key 是一个 profile 名称（可自定义）
+# - 每个 profile 可绑定多个 targets（币种），并配置订阅周期、决策频率、指标中间件等
+# - prompts 用于按模型选择 system prompt（system_by_model）以及统一的 user prompt
+# - exit_plans.combos 用于限定可用的 exit_plan 组件组合（实际模板在 ai.exit_plan_path 指向的目录）
+
 profiles:
   eth_plan_combo:
-    context_tag: "ETH 分阶段策略"
-    targets: ["ETH/USDT"]                   # 仅回放 ETH/USDT
-    intervals: ["15m", "1h", "4h"]    # 汇总 4 个周期
-    decision_interval_multiple: 4           # 决策调度：最短K线周期 * 倍数（UTC对齐），默认 1
-    analysis_slice: 160                     # 每个周期截取 160 根
-    slice_drop_tail: 1                      # 舍弃最新 1 根，避免未收线
+    context_tag: "ETH 分阶段策略"           # 上下文标签：用于 prompt/日志展示
+    targets: ["ETH/USDT"]                   # 交易对列表（建议大写；支持多个）
+    intervals: ["15m", "1h", "4h"]          # 订阅的 K 线周期（将汇总给模型）
+    decision_interval_multiple: 1           # 决策调度：最短周期 * 倍数（UTC 对齐）；例如最短 15m，倍数 4 => 每 1h 决策一次
+    analysis_slice: 160                     # 每个周期截取最近 N 根 K 线参与分析
+    slice_drop_tail: 1                      # 丢弃最新 N 根（避免最后一根未收线导致噪声）
     # middlewares 中如启用 ema/rsi/macd，将自动触发 Multi-Agent；若全部关闭则 Provider 阶段不会调用 Agent。
     middlewares:
-      - name: kline_fetcher                 # 基础 K 线抓取
-        stage: 0
-        critical: true
-        timeout_seconds: 5
+      # middlewares：按 stage 分阶段执行（stage 越小越靠前）
+      # - critical=true 表示失败会中止该 symbol 的分析（建议至少 kline_fetcher 设为 true）
+      # - timeout_seconds：单个中间件的超时
+      - name: kline_fetcher                 # 基础 K 线抓取（必须先拉到数据）
+        stage: 0                            # stage=0：数据准备阶段
+        critical: true                      # 关键步骤失败则中止
+        timeout_seconds: 5                  # 超时（秒）
         params:
-          intervals: ["15m", "1h", "4h"]
-          limit: 240
-      - name: ema_trend                     # EMA 运行参数，支持多周期共振
-        stage: 1
+          intervals: ["15m", "1h", "4h"]    # 拉取的周期列表
+          limit: 240                        # 每个周期最多拉取多少根（需 >= analysis_slice + slice_drop_tail）
+      - name: ema_trend                     # EMA 趋势（支持多周期共振）
+        stage: 1                            # stage=1：指标计算阶段
         configs:
-          "15m": { fast: 8, mid: 21, slow: 55 }
+          "15m": { fast: 8, mid: 21, slow: 55 }   # 按周期配置；key 为 interval
           "1h":  { fast: 8, mid: 21, slow: 55 }
           "4h":  { fast: 20, mid: 50, slow: 200 }
-      - name: rsi_extreme                   # RSI 极值过滤，防止追高杀低
+      - name: rsi_extreme                   # RSI 极值过滤（防追高杀低）
         stage: 1
         configs:
-          "15m": { period: 14, overbought: 75, oversold: 25 }
+          "15m": { period: 14, overbought: 75, oversold: 25 } # overbought/oversold 为阈值
           "1h":  { period: 14, overbought: 70, oversold: 30 }
           "4h":  { period: 14, overbought: 70, oversold: 30 }
-      - name: macd_trend                    # MACD 灵敏参数，方便回测
+      - name: macd_trend                    # MACD 趋势（灵敏参数便于回测/调参）
         stage: 1
         configs:
           "15m": { fast: 5, slow: 13, signal: 8 }
           "1h":  { fast: 12, slow: 26, signal: 9 }
           "4h":  { fast: 12, slow: 26, signal: 9 }
     prompts:
-      user: "lauk.txt"  # User prompt 细化 exit_plan 约束
+      # prompts：
+      # - user：用户提示文件（相对 prompts/ 或按 loader 规则解析），用于补充风控/输出格式/exit_plan 约束等
+      # - system_by_model：按模型 id 指定 system prompt（同一个 profile 可对不同模型给不同 system prompt）
+      user: "lauk.txt"                     # User prompt：细化 exit_plan 约束
       system_by_model:
-        deepseek: "system-eth1.txt"
+        deepseek: "system-eth1.txt"         # key 为 ai.models[].id
         qwen: "system-eth2.txt"
         doubao: "system-eth3.txt"
-    derivatives:                            # 衍生品注入开关（未启用则完全跳过 OI/Funding 抓取）
-      enabled: true
-      include_oi: true
-      include_funding: true
+    derivatives:                             # 衍生品注入开关（关闭则完全跳过 OI/Funding 抓取）
+      enabled: true                          # 是否启用衍生品数据（OI/Funding）
+      include_oi: true                       # 是否注入 Open Interest
+      include_funding: true                  # 是否注入 Funding Rate
     exit_plans:
-      combos: ["tp_tiers__sl_single"]       # 计划固定为 plan_combo_main，组合用于限定 children 模板
+      combos: ["tp_tiers__sl_single"]        # 允许的 exit_plan 组合 key（用于限定 children 模板）
+    # default: true                          # 可选：设为 true 表示默认 profile（当 symbol 未显式绑定时可作为兜底）
 
   btc_plan_combo:
     context_tag: "BTC 分阶段策略"
     targets: ["BTC/USDT"]
     intervals: ["15m"]
-    decision_interval_multiple: 2
+    decision_interval_multiple: 1
     analysis_slice: 160
     slice_drop_tail: 1
     middlewares:

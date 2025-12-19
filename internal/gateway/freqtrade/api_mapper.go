@@ -32,19 +32,22 @@ func liveOrderStatusText(status database.LiveOrderStatus) string {
 }
 
 func liveOrderToAPIPosition(rec database.LiveOrderRecord, nowMillis int64) exchange.APIPosition {
+	now := time.Now()
+	if nowMillis > 0 {
+		now = time.UnixMilli(nowMillis)
+	}
+	openedAt := time.Time{}
+	if rec.StartTime != nil {
+		openedAt = *rec.StartTime
+	}
+	closedAt := time.Time{}
+	if rec.EndTime != nil {
+		closedAt = *rec.EndTime
+	}
+
 	openAtMillis := timeToMillis(rec.StartTime)
 	closeAtMillis := timeToMillis(rec.EndTime)
-	holdingUntil := nowMillis
-	if closeAtMillis > 0 {
-		holdingUntil = closeAtMillis
-	}
-	holdingMs := int64(0)
-	if openAtMillis > 0 {
-		holdingMs = holdingUntil - openAtMillis
-		if holdingMs < 0 {
-			holdingMs = 0
-		}
-	}
+	holdingMs := positionHoldingMs(openedAt, now, closedAt)
 
 	currentPrice := valOrZero(rec.CurrentPrice)
 	if currentPrice == 0 {
@@ -63,28 +66,27 @@ func liveOrderToAPIPosition(rec database.LiveOrderRecord, nowMillis int64) excha
 	}
 
 	out := exchange.APIPosition{
-		TradeID:       rec.FreqtradeID,
-		Symbol:        rec.Symbol,
-		Side:          rec.Side,
-		EntryPrice:    valOrZero(rec.Price),
-		Amount:        valOrZero(rec.Amount),
-		InitialAmount: valOrZero(rec.InitialAmount),
-		Stake:         valOrZero(rec.StakeAmount),
-		Leverage:      valOrZero(rec.Leverage),
-		PositionValue: valOrZero(rec.PositionValue),
-		OpenedAt:      openAtMillis,
-		HoldingMs:     holdingMs,
-		CurrentPrice:  currentPrice,
-		PnLRatio:      pnlRatio,
-		PnLUSD:        pnlUSD,
-		RealizedPnLRatio: valOrZero(rec.RealizedPnLRatio),
-		RealizedPnLUSD:   valOrZero(rec.RealizedPnLUSD),
+		TradeID:            rec.FreqtradeID,
+		Symbol:             rec.Symbol,
+		Side:               rec.Side,
+		EntryPrice:         valOrZero(rec.Price),
+		Amount:             valOrZero(rec.Amount),
+		InitialAmount:      valOrZero(rec.InitialAmount),
+		Stake:              valOrZero(rec.StakeAmount),
+		Leverage:           valOrZero(rec.Leverage),
+		PositionValue:      valOrZero(rec.PositionValue),
+		OpenedAt:           openAtMillis,
+		HoldingMs:          holdingMs,
+		CurrentPrice:       currentPrice,
+		PnLRatio:           pnlRatio,
+		PnLUSD:             pnlUSD,
+		RealizedPnLRatio:   valOrZero(rec.RealizedPnLRatio),
+		RealizedPnLUSD:     valOrZero(rec.RealizedPnLUSD),
 		UnrealizedPnLRatio: valOrZero(rec.UnrealizedPnLRatio),
 		UnrealizedPnLUSD:   valOrZero(rec.UnrealizedPnLUSD),
-		Status:            liveOrderStatusText(rec.Status),
+		Status:             liveOrderStatusText(rec.Status),
 	}
 
-	// position_value is displayed as notional (total position value), not margin.
 	ref := currentPrice
 	if ref <= 0 {
 		ref = out.EntryPrice
@@ -100,19 +102,7 @@ func liveOrderToAPIPosition(rec database.LiveOrderRecord, nowMillis int64) excha
 		out.UnrealizedPnLRatio = pnlRatio
 	}
 
-	initAmt := valOrZero(rec.InitialAmount)
-	if initAmt > 0 {
-		amt := valOrZero(rec.Amount)
-		if amt > 0 {
-			out.RemainingRatio = amt / initAmt
-		} else if rec.ClosedAmount != nil {
-			remaining := initAmt - valOrZero(rec.ClosedAmount)
-			if remaining < 0 {
-				remaining = 0
-			}
-			out.RemainingRatio = remaining / initAmt
-		}
-	}
+	out.RemainingRatio = remainingRatio(rec)
 
 	if closeAtMillis > 0 {
 		out.ClosedAt = closeAtMillis
@@ -123,20 +113,19 @@ func liveOrderToAPIPosition(rec database.LiveOrderRecord, nowMillis int64) excha
 }
 
 func exchangePositionToAPIPosition(pos exchange.Position, nowMillis int64) exchange.APIPosition {
+	now := time.Now()
+	if nowMillis > 0 {
+		now = time.UnixMilli(nowMillis)
+	}
+
 	openAtMillis := pos.OpenedAt.UnixMilli()
 	closeAtMillis := int64(0)
-	holdingUntil := nowMillis
+	closedAt := time.Time{}
 	if !pos.IsOpen && !pos.UpdatedAt.IsZero() {
-		closeAtMillis = pos.UpdatedAt.UnixMilli()
-		holdingUntil = closeAtMillis
+		closedAt = pos.UpdatedAt
+		closeAtMillis = closedAt.UnixMilli()
 	}
-	holdingMs := int64(0)
-	if openAtMillis > 0 {
-		holdingMs = holdingUntil - openAtMillis
-		if holdingMs < 0 {
-			holdingMs = 0
-		}
-	}
+	holdingMs := positionHoldingMs(pos.OpenedAt, now, closedAt)
 
 	tradeID, _ := strconv.Atoi(pos.ID)
 	currentPrice := pos.CurrentPrice
@@ -172,7 +161,6 @@ func exchangePositionToAPIPosition(pos exchange.Position, nowMillis int64) excha
 		out.ExitPrice = currentPrice
 	}
 
-	// Prefer unrealized as main PnL for open positions.
 	if pos.IsOpen {
 		out.PnLRatio = out.UnrealizedPnLRatio
 		out.PnLUSD = out.UnrealizedPnLUSD
@@ -209,4 +197,27 @@ func positionHoldingMs(openedAt time.Time, now time.Time, closedAt time.Time) in
 		return 0
 	}
 	return d.Milliseconds()
+}
+
+// remainingRatio estimates remaining position size versus initial.
+// If Amount is missing but ClosedAmount exists, it derives remaining = initial - closed.
+func remainingRatio(rec database.LiveOrderRecord) float64 {
+	initAmt := valOrZero(rec.InitialAmount)
+	if initAmt <= 0 {
+		return 0
+	}
+
+	amt := valOrZero(rec.Amount)
+	if amt > 0 {
+		return amt / initAmt
+	}
+
+	if rec.ClosedAmount != nil {
+		remaining := initAmt - valOrZero(rec.ClosedAmount)
+		if remaining < 0 {
+			remaining = 0
+		}
+		return remaining / initAmt
+	}
+	return 0
 }

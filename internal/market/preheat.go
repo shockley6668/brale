@@ -7,9 +7,6 @@ import (
 	"brale/internal/logger"
 )
 
-// 中文说明：
-// 预热器：进程启动时，使用 REST 拉取最近 N 根 K 线，避免 WS 冷启动期间上下文为空。
-
 type Preheater struct {
 	Store  KlineStore
 	Max    int
@@ -20,7 +17,6 @@ func NewPreheater(s KlineStore, max int, src Source) *Preheater {
 	return &Preheater{Store: s, Max: max, Source: src}
 }
 
-// Preheat 执行预热：对每个 symbol+interval 拉取最近 max 根并写入存储
 func (p *Preheater) Preheat(ctx context.Context, symbols, intervals []string, limit int) {
 	if p.Store == nil {
 		return
@@ -59,7 +55,6 @@ func (p *Preheater) Preheat(ctx context.Context, symbols, intervals []string, li
 	}
 }
 
-// Warmup 根据每个周期的需求条数拉取历史，确保初次指标计算可用。
 func (p *Preheater) Warmup(ctx context.Context, symbols []string, lookbacks map[string]int) {
 	if p.Store == nil || len(lookbacks) == 0 {
 		return

@@ -13,7 +13,6 @@ import (
 	talib "github.com/markcheno/go-talib"
 )
 
-// RSIConfig 控制 RSI 参数。
 type RSIConfig struct {
 	Name       string
 	Stage      int
@@ -25,7 +24,6 @@ type RSIConfig struct {
 	Oversold   float64
 }
 
-// RSIMiddleware 输出 RSI 状态。
 type RSIMiddleware struct {
 	meta       pipeline.MiddlewareMeta
 	interval   string
@@ -34,7 +32,6 @@ type RSIMiddleware struct {
 	oversold   float64
 }
 
-// NewRSIMiddleware 构造 RSI 中间件。
 func NewRSIMiddleware(cfg RSIConfig) *RSIMiddleware {
 	if cfg.Period <= 0 {
 		cfg.Period = 14
@@ -59,10 +56,8 @@ func NewRSIMiddleware(cfg RSIConfig) *RSIMiddleware {
 	}
 }
 
-// Meta 实现接口。
 func (m *RSIMiddleware) Meta() pipeline.MiddlewareMeta { return m.meta }
 
-// Handle 计算 RSI。
 func (m *RSIMiddleware) Handle(ctx context.Context, ac *pipeline.AnalysisContext) error {
 	interval := m.interval
 	if interval == "" {

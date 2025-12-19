@@ -10,7 +10,6 @@ import (
 	"brale/internal/market"
 )
 
-// CandleCSVOptions 控制 K 线 CSV 的元信息与精度。
 type CandleCSVOptions struct {
 	Location       *time.Location
 	PricePrecision int
@@ -18,13 +17,11 @@ type CandleCSVOptions struct {
 }
 
 const (
-	// PrecisionAuto 根据 K 线价格区间自动决定精度。
 	PrecisionAuto = math.MinInt32
-	// PrecisionRaw 表示保留原始精度（等价于 strconv.FormatFloat(..., -1, 64)）
+
 	PrecisionRaw = -1
 )
 
-// BuildCandleCSV 生成 CSV 数据，首行包含列头。
 func BuildCandleCSV(candles []market.Candle, opts CandleCSVOptions) string {
 	if len(candles) == 0 {
 		return ""

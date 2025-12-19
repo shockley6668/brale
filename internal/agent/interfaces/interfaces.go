@@ -7,37 +7,41 @@ import (
 	"brale/internal/gateway/exchange"
 )
 
-// PositionService manages account balance and open positions.
+// PositionService handles account state and position tracking.
+// Used by scheduler to build LLM context before each decision cycle.
 type PositionService interface {
-	// GetAccountSnapshot returns the latest account balance and status.
+	// Returns balance, margin, and equity for LLM prompt context.
 	GetAccountSnapshot(ctx context.Context) (decision.AccountSnapshot, error)
 
-	// ListPositions returns all currently open positions.
+	// Fetches all open positions from exchange. Used for position-aware prompts.
 	ListPositions(ctx context.Context) ([]decision.PositionSnapshot, error)
 
-	// SyncStrategies synchronizes local strategy plans with the exchange/executor.
+	// Loads persisted exit strategies and registers price watchers.
+	// Hook is called when a strategy triggers (e.g., trailing stop hit).
 	SyncStrategies(ctx context.Context, hook exchange.PlanUpdateHook) error
 
-	// TradeIDForSymbol returns the trade ID for a given symbol if it exists.
+	// Maps symbol to freqtrade trade_id for webhook correlation.
 	TradeIDForSymbol(symbol string) (int, bool)
 }
 
-// MarketService manages market data (K-lines, prices, indicators).
+// MarketService provides market data for LLM decision context.
+// Aggregates klines, indicators, and real-time prices.
 type MarketService interface {
-	// GetAnalysisContexts fetches market analysis data for the given symbols.
+	// Builds full analysis context per symbol: klines, indicators, OI, funding.
 	GetAnalysisContexts(ctx context.Context, symbols []string) ([]decision.AnalysisContext, error)
 
-	// LatestPrice returns the most recent price for a symbol.
+	// Returns cached price or fetches from exchange. Used for decision validation.
 	LatestPrice(ctx context.Context, symbol string) float64
 
-	// CaptureIndicators updates internal cache of indicators (e.g. ATR) from analysis contexts.
+	// Snapshots current indicator values for logging/debugging.
 	CaptureIndicators(ctxs []decision.AnalysisContext)
 
-	// GetATR returns cached ATR for a symbol.
+	// Returns ATR for dynamic stop-loss calculation. Returns false if unavailable.
 	GetATR(symbol string) (float64, bool)
 }
 
-// PlanAdjustSpec describes parameters for adjusting a plan.
+// PlanAdjustSpec describes a strategy adjustment request.
+// Source identifies who triggered the change (e.g., "trailing_stop", "manual").
 type PlanAdjustSpec struct {
 	TradeID   int
 	PlanID    string

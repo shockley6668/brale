@@ -4,7 +4,6 @@ import (
 	"time"
 )
 
-// PositionSnapshot 提供给提示词/agent 的仓位摘要。
 type PositionSnapshot struct {
 	Symbol          string   `json:"symbol"`
 	Side            string   `json:"side"`
@@ -26,7 +25,6 @@ type PositionSnapshot struct {
 	PlanStateJSON   string   `json:"plan_state_json,omitempty"`
 }
 
-// AccountSnapshot 汇报账户权益/可用资金等，供提示词展示。
 type AccountSnapshot struct {
 	Total     float64   `json:"total"`
 	Available float64   `json:"available"`

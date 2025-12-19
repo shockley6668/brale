@@ -63,8 +63,6 @@ func coerceInt(v any) int {
 	return int(coerceFloat64(v))
 }
 
-// UnmarshalJSON provides tolerant decoding for AI-generated JSON where numeric fields
-// may be encoded as strings or floats (e.g., leverage: 5.0).
 func (d *Decision) UnmarshalJSON(data []byte) error {
 	var raw map[string]any
 	if err := json.Unmarshal(data, &raw); err != nil {

@@ -8,10 +8,6 @@ import (
 
 const DefaultBinanceKlineGrace = 10 * time.Second
 
-// DropUnclosedBinanceKline drops the last element if it is still in-progress.
-// Binance style: the last kline may be the current, not-yet-closed candle.
-//
-// Candle times are expected to be in milliseconds since epoch.
 func DropUnclosedBinanceKline(klines []market.Candle, interval time.Duration) []market.Candle {
 	return dropUnclosedBinanceKlineAt(klines, interval, time.Now().UTC(), DefaultBinanceKlineGrace)
 }

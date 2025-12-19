@@ -10,67 +10,20 @@ import (
 	"brale/internal/strategy/exit"
 )
 
-// trailingStopHandler 实现简化版追踪止盈/止损逻辑：
-// - 价格到达 trigger_pct 激活追踪；
-// - 每次创新高（多）/新低（空）都会抬升追踪止损；
-// - 价格跌破追踪止损即触发平仓事件。
 type trailingStopHandler struct{}
 
 func (h *trailingStopHandler) ID() string { return "trailing_stop_pct" }
 
 func (h *trailingStopHandler) Validate(params map[string]any) error {
-	if params == nil {
-		return fmt.Errorf("缺少参数")
-	}
-	if raw, ok := params["mode"]; ok {
-		mode, ok := raw.(string)
-		if !ok {
-			return fmt.Errorf("mode 必须为字符串")
-		}
-		mode = strings.ToLower(strings.TrimSpace(mode))
-		if mode != "" && mode != "take_profit" && mode != "stop_loss" {
-			return fmt.Errorf("mode 只能是 take_profit 或 stop_loss")
-		}
+	if err := validateModeParam(params); err != nil {
+		return err
 	}
 	trigger, okTrig := number(params["trigger_pct"])
 	trail, okTrail := number(params["trail_pct"])
 	if okTrig && okTrail {
-		if trigger <= 0 {
-			return fmt.Errorf("trigger_pct 需 >0")
-		}
-		if trail <= 0 {
-			return fmt.Errorf("trail_pct 需 >0")
-		}
-		if trail >= trigger {
-			return fmt.Errorf("trail_pct 需小于 trigger_pct")
-		}
-		if trigger > 0.25 {
-			return fmt.Errorf("trigger_pct 不能超过 25%%，当前=%.2f%%", trigger*100)
-		}
-		if trigger < 0.005 {
-			return fmt.Errorf("trigger_pct 至少 0.5%%，当前=%.2f%%", trigger*100)
-		}
-		if trail < 0.002 {
-			return fmt.Errorf("trail_pct 至少 0.2%%，当前=%.2f%%", trail*100)
-		}
-		return nil
+		return validateTrailingPctParams(trigger, trail)
 	}
-	atrVal, okATR := number(params["atr_value"])
-	triggerMul, okTrigMul := number(params["trigger_multiplier"])
-	trailMul, okTrailMul := number(params["trail_multiplier"])
-	if !okATR || !okTrigMul || !okTrailMul || atrVal <= 0 || triggerMul <= 0 || trailMul <= 0 {
-		return fmt.Errorf("需提供 trigger_pct/trail_pct 或 atr_value+multiplier")
-	}
-	if triggerMul > maxATRTriggerMultiplier || triggerMul < minATRTriggerMultiplier {
-		return fmt.Errorf("trigger_multiplier 需位于 [%.1f, %.1f]", minATRTriggerMultiplier, maxATRTriggerMultiplier)
-	}
-	if trailMul < minATRTrailMultiplier {
-		return fmt.Errorf("trail_multiplier 需 >= %.1f", minATRTrailMultiplier)
-	}
-	if trailMul >= triggerMul {
-		return fmt.Errorf("trail_multiplier 需小于 trigger_multiplier")
-	}
-	return nil
+	return validateTrailingATRParams(params)
 }
 
 func (h *trailingStopHandler) Instantiate(ctx context.Context, args exit.InstantiateArgs) ([]exit.PlanInstance, error) {
@@ -304,8 +257,8 @@ func (h *trailingStopHandler) resolveTrailingPercents(entry float64, params map[
 	trailPct, okTrail := number(params["trail_pct"])
 	initialStopPct, _ := number(params["initial_stop_pct"])
 	if okTrig && okTrail && triggerPct > 0 && trailPct > 0 {
-		if trailPct >= triggerPct {
-			return 0, 0, 0, fmt.Errorf("trailing_stop_pct: trail_pct 需小于 trigger_pct")
+		if err := validateTrailingPctParams(triggerPct, trailPct); err != nil {
+			return 0, 0, 0, fmt.Errorf("trailing_stop_pct: %w", err)
 		}
 		return triggerPct, trailPct, initialStopPct, nil
 	}

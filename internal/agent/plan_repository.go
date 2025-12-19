@@ -94,9 +94,7 @@ func (r *PlanRepository) BuildWatcher(planID string, handler exit.PlanHandler, r
 	if root == nil {
 		return nil
 	}
-	// 注意：不再因为 root.Status == Done 就跳过整个 watcher
-	// EvaluateWatcher 中会检查每个组件的状态，跳过 Done/Pending 的组件
-	// 这样即使数据不一致（root Done 但某些 tier 仍 Waiting），也能正确处理
+
 	planState, err := exit.DecodeTierPlanState(root.Record.StateJSON)
 	if err != nil {
 		logger.Warnf("PlanRepository: 解析 plan root 失败 trade=%d plan=%s err=%v", root.Record.TradeID, planID, err)
@@ -160,7 +158,7 @@ func (r *PlanRepository) LogStateChange(ctx context.Context, inst *exit.PlanInst
 		return
 	}
 	if trigger == exit.PlanEventTypeTierHit {
-		// 分段触发转由 trade_operation_log 记录
+
 		return
 	}
 	newState := normalizeStateJSON(inst.Record.StateJSON)
@@ -279,7 +277,7 @@ func buildPlanChangeReason(inst *exit.PlanInstance, oldState, newState string, o
 func collectStateChangeLines(inst *exit.PlanInstance, oldState, newState string, changes map[string]any) ([]string, map[string]any) {
 	component := strings.TrimSpace(inst.Record.PlanComponent)
 	if len(changes) == 0 {
-		// 仅依赖 statusChanged 记录（避免因内部时间戳等字段导致无意义刷屏）。
+
 		return nil, nil
 	}
 	oldValues := make(map[string]string, len(changes))
@@ -365,11 +363,9 @@ func formatRelativePrice(entry, pct float64, side string) string {
 		return ""
 	}
 	side = strings.ToLower(strings.TrimSpace(side))
-	price := entry
+	price := entry * (1 + pct)
 	if side == "short" {
 		price = entry * (1 - pct)
-	} else {
-		price = entry * (1 + pct)
 	}
 	return utils.FormatFloat(price)
 }
@@ -499,7 +495,6 @@ func operationFromEvent(evtType string) database.OperationType {
 	}
 }
 
-// buildPlanSnapshots converts database records to exit plan snapshots (Helper moved here)
 func buildPlanSnapshots(recs []database.StrategyInstanceRecord) []exit.StrategyPlanSnapshot {
 	if len(recs) == 0 {
 		return nil

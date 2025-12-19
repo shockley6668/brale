@@ -1,4 +1,3 @@
-// Package convert provides type conversion utilities.
 package convert
 
 import (
@@ -7,8 +6,6 @@ import (
 	"strings"
 )
 
-// ToFloat64 converts various numeric types to float64.
-// Returns 0 for unsupported types or parse failures.
 func ToFloat64(v any) float64 {
 	switch t := v.(type) {
 	case nil:

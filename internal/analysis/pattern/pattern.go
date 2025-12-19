@@ -8,7 +8,6 @@ import (
 	"brale/internal/market"
 )
 
-// Result 汇总形态与趋势文字描述。
 type Result struct {
 	PatternSummary string   `json:"pattern_summary"`
 	TrendSummary   string   `json:"trend_summary"`
@@ -16,7 +15,6 @@ type Result struct {
 	Signals        []string `json:"signals"`
 }
 
-// Analyze 识别基础形态/趋势，输出文本描述。
 func Analyze(candles []market.Candle) Result {
 	if len(candles) == 0 {
 		return Result{PatternSummary: "无可用K线数据", TrendSummary: "无趋势"}

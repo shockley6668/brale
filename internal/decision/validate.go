@@ -5,11 +5,6 @@ import (
 	"strings"
 )
 
-// 中文说明：
-// 基础决策校验：
-// - action 合法
-// - 开仓（open_*）必须给出必要参数且>0
-
 var validActions = map[string]bool{
 	"open_long": true, "open_short": true, "close_long": true, "close_short": true,
 	"hold": true, "wait": true, "update_exit_plan": true,
@@ -33,7 +28,7 @@ func Validate(d *Decision) error {
 		if d.Confidence < 0 || d.Confidence > 100 {
 			return fmt.Errorf("confidence 范围0-100")
 		}
-		// Tiers validation removed
+
 	case "update_exit_plan":
 		if d.ExitPlan == nil || strings.TrimSpace(d.ExitPlan.ID) == "" {
 			return fmt.Errorf("update_exit_plan 需提供 exit_plan")
@@ -42,11 +37,6 @@ func Validate(d *Decision) error {
 	return nil
 }
 
-// validateTiers removed
-
-// ValidateWithPrice 带当前价格的校验，增加：
-// - 多空止损/止盈相对关系
-// - 风险回报比（reward/risk >= minRR）
 func ValidateWithPrice(d *Decision, price float64, minRR float64) error {
 	if err := Validate(d); err != nil {
 		return err
@@ -55,7 +45,7 @@ func ValidateWithPrice(d *Decision, price float64, minRR float64) error {
 		return nil
 	}
 	if d.StopLoss <= 0 || d.TakeProfit <= 0 {
-		// 当仅提供 exit_plan（百分比）时无法做绝对价校验，直接跳过。
+
 		return nil
 	}
 	if price <= 0 {

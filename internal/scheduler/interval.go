@@ -6,8 +6,6 @@ import (
 	"time"
 )
 
-// ParseIntervalDuration parses "15m", "1h", "4h", "1d", "1w" into time.Duration.
-// Returns (0, false) on invalid input.
 func ParseIntervalDuration(interval string) (time.Duration, bool) {
 	interval = strings.ToLower(strings.TrimSpace(interval))
 	if interval == "" {

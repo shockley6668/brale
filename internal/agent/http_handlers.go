@@ -11,7 +11,6 @@ import (
 	livehttp "brale/internal/transport/http/live"
 )
 
-// HandleFreqtradeWebhook implements livehttp.FreqtradeWebhookHandler.
 func (s *LiveService) HandleFreqtradeWebhook(ctx context.Context, msg exchange.WebhookMessage) error {
 	if s == nil || s.execManager == nil {
 		return fmt.Errorf("live service 未初始化")
@@ -25,9 +24,8 @@ func (s *LiveService) HandleFreqtradeWebhook(ctx context.Context, msg exchange.W
 	return nil
 }
 
-// ListFreqtradePositions implements livehttp.FreqtradeWebhookHandler.
 func (s *LiveService) ListFreqtradePositions(ctx context.Context, opts exchange.PositionListOptions) (exchange.PositionListResult, error) {
-	// 默认回传分页参数，避免零值。
+
 	result := exchange.PositionListResult{
 		Page:     opts.Page,
 		PageSize: opts.PageSize,
@@ -47,8 +45,6 @@ func (s *LiveService) ListFreqtradePositions(ctx context.Context, opts exchange.
 	return s.execManager.PositionsForAPI(ctx, opts)
 }
 
-// GetFreqtradePosition returns a single position detail for admin UI.
-// It prefers a direct trade_id lookup when the underlying execution manager supports it.
 func (s *LiveService) GetFreqtradePosition(ctx context.Context, tradeID int) (*exchange.APIPosition, error) {
 	if s == nil || s.execManager == nil {
 		return nil, fmt.Errorf("live service 未初始化")
@@ -60,7 +56,6 @@ func (s *LiveService) GetFreqtradePosition(ctx context.Context, tradeID int) (*e
 		return getter.APIPositionByID(ctx, tradeID)
 	}
 
-	// Fallback: scan recent list.
 	opts := exchange.PositionListOptions{
 		Page:        1,
 		PageSize:    1000,
@@ -80,8 +75,6 @@ func (s *LiveService) GetFreqtradePosition(ctx context.Context, tradeID int) (*e
 	return nil, fmt.Errorf("position not found")
 }
 
-// RefreshFreqtradePosition triggers a reconcile for a single trade and returns the latest snapshot.
-// Used by admin UI to refresh PnL without reloading the whole page.
 func (s *LiveService) RefreshFreqtradePosition(ctx context.Context, tradeID int) (*exchange.APIPosition, error) {
 	if s == nil || s.execManager == nil {
 		return nil, fmt.Errorf("live service 未初始化")
@@ -95,7 +88,6 @@ func (s *LiveService) RefreshFreqtradePosition(ctx context.Context, tradeID int)
 	return s.GetFreqtradePosition(ctx, tradeID)
 }
 
-// GetLatestPriceQuote implements livehttp.FreqtradeWebhookHandler.
 func (s *LiveService) GetLatestPriceQuote(ctx context.Context, symbol string) (exchange.PriceQuote, error) {
 	if s == nil || s.monitor == nil {
 		return exchange.PriceQuote{}, fmt.Errorf("price monitor 未启用")
@@ -103,16 +95,14 @@ func (s *LiveService) GetLatestPriceQuote(ctx context.Context, symbol string) (e
 	return s.monitor.GetLatestPriceQuote(ctx, symbol)
 }
 
-// CloseFreqtradePosition implements livehttp.FreqtradeWebhookHandler.
 func (s *LiveService) CloseFreqtradePosition(ctx context.Context, tradeID int, symbol, side string, closeRatio float64) error {
 	if s == nil || s.execManager == nil {
 		return fmt.Errorf("live service 未初始化")
 	}
-	// Use ExecutionManager directly
+
 	return s.execManager.CloseFreqtradePosition(ctx, tradeID, symbol, side, closeRatio)
 }
 
-// ListFreqtradeEvents implements livehttp.FreqtradeWebhookHandler.
 func (s *LiveService) ListFreqtradeEvents(ctx context.Context, tradeID int, limit int) ([]exchange.TradeEvent, error) {
 	if s == nil || s.execManager == nil {
 		return nil, fmt.Errorf("live service 未初始化")
@@ -120,16 +110,14 @@ func (s *LiveService) ListFreqtradeEvents(ctx context.Context, tradeID int, limi
 	return s.execManager.ListFreqtradeEvents(ctx, tradeID, limit)
 }
 
-// ManualOpenPosition 提供管理后台手动开仓（免审）的快捷通道。
 func (s *LiveService) ManualOpenPosition(ctx context.Context, req exchange.ManualOpenRequest) error {
 	if s == nil || s.execManager == nil {
 		return fmt.Errorf("freqtrade 执行器未启用")
 	}
-	// Use ExecutionManager directly
+
 	return s.execManager.ManualOpenPosition(ctx, req)
 }
 
-// AdjustPlan implements livehttp.FreqtradeWebhookHandler.
 func (s *LiveService) AdjustPlan(ctx context.Context, req livehttp.PlanAdjustRequest) error {
 	if s == nil || s.planScheduler == nil {
 		return fmt.Errorf("plan scheduler 未初始化")

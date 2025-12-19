@@ -2,7 +2,6 @@ package config
 
 import "strings"
 
-// Config 是 Brale 的主配置载体。
 type Config struct {
 	App       AppConfig       `toml:"app"`
 	Kline     KlineConfig     `toml:"kline"`
@@ -56,15 +55,13 @@ type AdvancedConfig struct {
 	PlanRefreshIntervalSeconds int     `toml:"plan_refresh_interval_seconds"`
 }
 
-// TradingConfig 控制模拟/实盘资金来源与默认仓位策略。
 type TradingConfig struct {
-	Mode               string  `toml:"mode"`                 // "static" | 后续扩展 "live"
-	MaxPositionPct     float64 `toml:"max_position_pct"`     // 单笔最大占用比例 0~1
-	DefaultPositionUSD float64 `toml:"default_position_usd"` // 若>0，直接作为 fallback 仓位
-	DefaultLeverage    int     `toml:"default_leverage"`     // 缺省杠杆
+	Mode               string  `toml:"mode"`
+	MaxPositionPct     float64 `toml:"max_position_pct"`
+	DefaultPositionUSD float64 `toml:"default_position_usd"`
+	DefaultLeverage    int     `toml:"default_leverage"`
 }
 
-// PositionSizeUSD 返回默认仓位大小（若设置 default_position_usd 则直接返回）。
 func (t TradingConfig) PositionSizeUSD() float64 {
 	if t.DefaultPositionUSD > 0 {
 		return t.DefaultPositionUSD
@@ -72,7 +69,6 @@ func (t TradingConfig) PositionSizeUSD() float64 {
 	return 0
 }
 
-// FreqtradeConfig 描述外部执行引擎的访问方式。
 type FreqtradeConfig struct {
 	Enabled            bool    `toml:"enabled"`
 	APIURL             string  `toml:"api_url"`
@@ -88,26 +84,24 @@ type FreqtradeConfig struct {
 	MinStopDistancePct float64 `toml:"min_stop_distance_pct"`
 	EntrySlipPct       float64 `toml:"entry_slip_pct"`
 	EntryTag           string  `toml:"entry_tag"`
-	StakeCurrency      string  `toml:"stake_currency"` // New: for building Freqtrade pairs like ETH/USDT:USDT
+	StakeCurrency      string  `toml:"stake_currency"`
 }
 
-// AIConfig 包含与模型、持仓周期相关的所有设置。
 type AIConfig struct {
-	Aggregation             string                 `toml:"aggregation"`
-	LogEachModel            bool                   `toml:"log_each_model"`
-	Weights                 map[string]float64     `toml:"weights"`
-	ProviderPreference      []string               `toml:"provider_preference"`
-	DecisionOffsetSeconds   int                    `toml:"decision_offset_seconds"`
-	DecisionLogPath         string                 `toml:"decision_log_path"`
-	ActiveHorizon           string                 `toml:"active_horizon"`
-	ProviderPresets         map[string]ModelPreset `toml:"provider_presets"`
-	Models                  []AIModelConfig        `toml:"models"`
-	MultiAgent              MultiAgentConfig       `toml:"multi_agent"`
-	ProfilesPath            string                 `toml:"profiles_path"`
-	ExitPlanPath            string                 `toml:"exit_strategies_path"`
+	Aggregation           string                 `toml:"aggregation"`
+	LogEachModel          bool                   `toml:"log_each_model"`
+	Weights               map[string]float64     `toml:"weights"`
+	ProviderPreference    []string               `toml:"provider_preference"`
+	DecisionOffsetSeconds int                    `toml:"decision_offset_seconds"`
+	DecisionLogPath       string                 `toml:"decision_log_path"`
+	ActiveHorizon         string                 `toml:"active_horizon"`
+	ProviderPresets       map[string]ModelPreset `toml:"provider_presets"`
+	Models                []AIModelConfig        `toml:"models"`
+	MultiAgent            MultiAgentConfig       `toml:"multi_agent"`
+	ProfilesPath          string                 `toml:"profiles_path"`
+	ExitPlanPath          string                 `toml:"exit_strategies_path"`
 }
 
-// ModelPreset 描述可复用的 API 连接配置。
 type ModelPreset struct {
 	APIURL         string            `toml:"api_url"`
 	APIKey         string            `toml:"api_key"`
@@ -116,7 +110,6 @@ type ModelPreset struct {
 	ExpectJSON     bool              `toml:"expect_json"`
 }
 
-// AIModelConfig 代表一个最终参与投票的模型条目。
 type AIModelConfig struct {
 	ID            string            `toml:"id"`
 	Provider      string            `toml:"provider"`
@@ -127,12 +120,11 @@ type AIModelConfig struct {
 	APIKey        string            `toml:"api_key"`
 	Model         string            `toml:"model"`
 	Headers       map[string]string `toml:"headers"`
-	// SupportsVision/ExpectJSON 使用指针以区分"显式 false"与"沿用预设值"。
+
 	SupportsVision *bool `toml:"supports_vision"`
 	ExpectJSON     *bool `toml:"expect_json"`
 }
 
-// ResolvedModelConfig 是合并预设后的最终模型配置。
 type ResolvedModelConfig struct {
 	ID             string
 	Provider       string
@@ -146,7 +138,6 @@ type ResolvedModelConfig struct {
 	ExpectJSON     bool
 }
 
-// MultiAgentConfig 描述多阶段 Agent 编排的配置。
 type MultiAgentConfig struct {
 	Enabled           bool   `toml:"enabled"`
 	IndicatorProvider string `toml:"indicator_provider"`
@@ -208,7 +199,6 @@ func (m MarketConfig) ResolveActiveSource() MarketSource {
 	return fallback
 }
 
-// keySet 用于追踪配置文件中显式设置的字段路径。
 type keySet map[string]struct{}
 
 func (k keySet) mark(path string) {
@@ -231,7 +221,6 @@ func (k keySet) isSet(path string) bool {
 	return ok
 }
 
-// fieldDefault 描述单个字段的默认值设置规则。
 type fieldDefault struct {
 	key   string
 	need  func() bool

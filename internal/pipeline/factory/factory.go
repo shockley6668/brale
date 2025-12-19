@@ -13,14 +13,12 @@ import (
 	"brale/internal/store"
 )
 
-// Factory 根据配置构建 Pipeline 中间件。
 type Factory struct {
 	Exporter         store.SnapshotExporter
 	DefaultIntervals []string
 	DefaultLimit     int
 }
 
-// Build 根据配置生成中间件。
 func (f *Factory) Build(cfg loader.MiddlewareConfig, profile loader.ProfileDefinition) (pipeline.Middleware, error) {
 	name := strings.TrimSpace(cfg.Name)
 	switch name {

@@ -10,10 +10,8 @@ import (
 	"brale/internal/pkg/text"
 )
 
-// Candles wraps a slice of Candle for helper methods.
 type Candles []Candle
 
-// TimeString formats close time (fallback to open time) in UTC.
 func (c Candle) TimeString() string {
 	ts := c.CloseTime
 	if ts == 0 {
@@ -25,7 +23,6 @@ func (c Candle) TimeString() string {
 	return time.UnixMilli(ts).UTC().Format("01-02 15:04") + "Z"
 }
 
-// Snapshot summarizes a window of candles for prompt display.
 func (cs Candles) Snapshot(interval, trend string) string {
 	if len(cs) == 0 {
 		return ""

@@ -1,6 +1,5 @@
 package decision
 
-// CloneStringMap performs a shallow copy of a string map.
 func CloneStringMap(src map[string]string) map[string]string {
 	if len(src) == 0 {
 		return nil

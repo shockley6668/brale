@@ -7,8 +7,6 @@ import (
 	symbolpkg "brale/internal/pkg/symbol"
 )
 
-// freqtradePairToSymbol converts a Freqtrade pair to internal symbol format.
-// e.g., "ETH/USDT:USDT" -> "ETH/USDT"
 func freqtradePairToSymbol(pair string) string {
 	return symbolpkg.Normalize(pair)
 }

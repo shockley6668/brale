@@ -18,7 +18,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// Router 暴露实盘相关的查询接口（决策/订单）。
 type Router struct {
 	Logs             *database.DecisionLogStore
 	FreqtradeHandler FreqtradeWebhookHandler
@@ -26,7 +25,6 @@ type Router struct {
 	logNames         []string
 }
 
-// NewRouter 构造 live HTTP router。
 func NewRouter(logs *database.DecisionLogStore, handler FreqtradeWebhookHandler, logPaths map[string]string) *Router {
 	names := make([]string, 0, len(logPaths))
 	for name, path := range logPaths {
@@ -38,7 +36,6 @@ func NewRouter(logs *database.DecisionLogStore, handler FreqtradeWebhookHandler,
 	return &Router{Logs: logs, FreqtradeHandler: handler, logPaths: logPaths, logNames: names}
 }
 
-// Register 将 /api/live 路由挂载到给定分组下。
 func (r *Router) Register(group *gin.RouterGroup) {
 	if group == nil {
 		return
@@ -55,7 +52,7 @@ func (r *Router) Register(group *gin.RouterGroup) {
 		group.GET("/freqtrade/positions/:id", r.handleFreqtradePositionDetail)
 		group.POST("/freqtrade/positions/:id/refresh", r.handleFreqtradePositionRefresh)
 		group.POST("/freqtrade/close", r.handleFreqtradeQuickClose)
-		// group.POST("/freqtrade/tiers", r.handleFreqtradeUpdateTiers) - removed
+
 		group.POST("/freqtrade/manual-open", r.handleFreqtradeManualOpen)
 		group.GET("/freqtrade/price", r.handleFreqtradePriceQuote)
 		group.GET("/freqtrade/events", r.handleFreqtradeEvents)
@@ -63,19 +60,17 @@ func (r *Router) Register(group *gin.RouterGroup) {
 	}
 }
 
-// FreqtradeWebhookHandler 供 LiveService 实现，以处理 freqtrade 推送。
 type FreqtradeWebhookHandler interface {
 	HandleFreqtradeWebhook(ctx context.Context, msg exchange.WebhookMessage) error
 	ListFreqtradePositions(ctx context.Context, opts exchange.PositionListOptions) (exchange.PositionListResult, error)
 	CloseFreqtradePosition(ctx context.Context, tradeID int, symbol, side string, closeRatio float64) error
-	// UpdateFreqtradeTiers removed
+
 	ListFreqtradeEvents(ctx context.Context, tradeID int, limit int) ([]exchange.TradeEvent, error)
 	ManualOpenPosition(ctx context.Context, req exchange.ManualOpenRequest) error
 	GetLatestPriceQuote(ctx context.Context, symbol string) (exchange.PriceQuote, error)
 	AdjustPlan(ctx context.Context, req PlanAdjustRequest) error
 }
 
-// PlanAdjustRequest 描述手动调整策略计划的参数。
 type PlanAdjustRequest struct {
 	TradeID   int                    `json:"trade_id"`
 	PlanID    string                 `json:"plan_id"`
@@ -125,8 +120,8 @@ func (r *Router) handleLiveDecisions(c *gin.Context) {
 	}
 
 	reqCtx := c.Request.Context()
-	// Fetch list first: desk only needs latest few records; COUNT(*) on a large table can be expensive.
-	listCtx, cancelList := context.WithTimeout(reqCtx, 2*time.Second)
+
+	listCtx, cancelList := context.WithTimeout(reqCtx, 10*time.Second)
 	logs, err := r.Logs.ListDecisions(listCtx, query)
 	cancelList()
 	if err != nil {
@@ -136,7 +131,7 @@ func (r *Router) handleLiveDecisions(c *gin.Context) {
 	}
 
 	includeCount := parseBoolDefaultTrue(c.DefaultQuery("include_count", "1"))
-	// Default optimization for desk: stage=final + first page + small limit => skip COUNT unless explicitly requested.
+
 	if includeCount && query.Offset == 0 && query.Limit > 0 && query.Limit <= 20 && strings.EqualFold(strings.TrimSpace(query.Stage), "final") {
 		if len(query.Symbols) > 0 || strings.TrimSpace(query.Symbol) != "" {
 			includeCount = false
@@ -148,7 +143,7 @@ func (r *Router) handleLiveDecisions(c *gin.Context) {
 		count, err := r.Logs.CountDecisions(countCtx, query)
 		cancelCount()
 		if err != nil {
-			// Do not fail the whole request if count is slow/blocked; return logs and set total_count=-1.
+
 			logger.Warnf("[api] live decisions count failed ip=%s err=%v", c.ClientIP(), err)
 		} else {
 			total = count
@@ -230,14 +225,14 @@ func (r *Router) handleFreqtradeWebhook(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "未配置 freqtrade 处理器"})
 		return
 	}
-	// Use freqtrade.WebhookMessage which handles string/number conversion with numericFloat/numericInt
+
 	var ftPayload freqtrade.WebhookMessage
 	if err := c.ShouldBindJSON(&ftPayload); err != nil {
 		logger.Errorf("[api] freqtrade webhook bind failed ip=%s err=%v", c.ClientIP(), err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	// Convert to exchange.WebhookMessage
+
 	payload := exchange.WebhookMessage{
 		Type:        ftPayload.Type,
 		TradeID:     int64(ftPayload.TradeID),
@@ -297,7 +292,7 @@ func (r *Router) handleFreqtradePositions(c *gin.Context) {
 		LogsLimit:   logsLimit,
 	}
 	reqCtx := c.Request.Context()
-	callCtx, cancel := context.WithTimeout(reqCtx, 2*time.Second)
+	callCtx, cancel := context.WithTimeout(reqCtx, 10*time.Second)
 	result, err := r.FreqtradeHandler.ListFreqtradePositions(callCtx, opts)
 	cancel()
 	if err != nil {
@@ -354,7 +349,6 @@ func (r *Router) handleFreqtradePositionDetail(c *gin.Context) {
 		return
 	}
 
-	// Fallback: scan recent list when handler doesn't support direct lookup.
 	logsLimit, _ := strconv.Atoi(c.DefaultQuery("logs_limit", "80"))
 	opts := exchange.PositionListOptions{
 		Page:        1,
@@ -498,14 +492,14 @@ func (r *Router) handlePlanInstances(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"instances": recs})
 }
 
-const maxLogLineSize = 4 * 1024 * 1024 // 4MB per line for payload-heavy logs
+const maxLogLineSize = 4 * 1024 * 1024
 
 func readLastLines(path string, limit int) ([]string, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	scanner := bufio.NewScanner(f)
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, maxLogLineSize)
@@ -559,8 +553,6 @@ func (r *Router) handleFreqtradeQuickClose(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
-
-// handleFreqtradeUpdateTiers removed
 
 func (r *Router) handleFreqtradeManualOpen(c *gin.Context) {
 	if r.FreqtradeHandler == nil {

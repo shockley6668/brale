@@ -16,14 +16,10 @@ import (
 	"brale/internal/trader"
 )
 
-// NOTE: exchange types are used now.
-
-// Logger abstracts decision log writes (live_decision_logs & live_orders).
 type Logger interface {
 	Insert(ctx context.Context, rec database.DecisionLogRecord) (int64, error)
 }
 
-// Manager provides freqtrade execution, logging, and position synchronization.
 type Manager struct {
 	client         *Client
 	cfg            config.FreqtradeConfig
@@ -34,7 +30,7 @@ type Manager struct {
 	executor       exchange.Exchange
 	balance        exchange.Balance
 	planUpdateHook exchange.PlanUpdateHook
-	// Trader Actor (Shadow Mode or Active)
+
 	trader *trader.Trader
 
 	openPlanMu    sync.Mutex
@@ -52,12 +48,10 @@ const (
 	reconcileDelay      = 5 * time.Second
 )
 
-// NewManager creates a freqtrade execution manager.
-// Returns an error if required dependencies are missing.
 func NewManager(client *Client, cfg config.FreqtradeConfig, logStore Logger, posStore database.LivePositionStore, newStore store.Store, textNotifier notifier.TextNotifier, executor exchange.Exchange) (*Manager, error) {
-	// Validate required dependencies
+
 	if posStore == nil {
-		// Try to extract from logStore if it implements the interface
+
 		if ps, ok := logStore.(database.LivePositionStore); ok {
 			posStore = ps
 		} else {
@@ -71,7 +65,6 @@ func NewManager(client *Client, cfg config.FreqtradeConfig, logStore Logger, pos
 
 	initLiveOrderPnL(posStore)
 
-	// Initialize Trader Actor with SQLite Event Store
 	eventStore := trader.NewSQLiteEventStore(posStore)
 
 	t := trader.NewTrader(executor, eventStore, posStore)

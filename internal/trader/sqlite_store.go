@@ -9,30 +9,23 @@ import (
 	"brale/internal/gateway/database"
 )
 
-// SQLiteEventStore implements EventStore using the main SQLite database.
 type SQLiteEventStore struct {
 	db database.LivePositionStore
 }
 
-// NewSQLiteEventStore creates a new adapter.
 func NewSQLiteEventStore(db database.LivePositionStore) *SQLiteEventStore {
 	return &SQLiteEventStore{
 		db: db,
 	}
 }
 
-// Append writes an event to the SQLite database.
 func (s *SQLiteEventStore) Append(evt EventEnvelope) error {
 	if s.db == nil {
 		return fmt.Errorf("sqlite store: database is nil")
 	}
 
-	// Default ID if missing
 	if evt.ID == "" {
-		// We might want to generate UUID here, or assume actor did it.
-		// For now let's hope actor did it or DB can auto-increment?
-		// EventRecord.ID is string (UUID). If empty, constraint violation?
-		// Assuming Actor assigns ID.
+		evt.ID = fmt.Sprintf("evt-%d", time.Now().UnixNano())
 	}
 
 	rec := database.EventRecord{
@@ -44,13 +37,9 @@ func (s *SQLiteEventStore) Append(evt EventEnvelope) error {
 		Symbol:    evt.Symbol,
 	}
 
-	// Use background context for now, or trace context if we had it stored in Envelope?
 	return s.db.AppendEvent(context.Background(), rec)
 }
 
-// LoadAll reads all events from the database.
-// Note: In production we might want LoadSince(id) or snapshotting.
-// Here we load all history which is acceptable for modest event counts.
 func (s *SQLiteEventStore) LoadAll() ([]EventEnvelope, error) {
 	if s.db == nil {
 		return nil, fmt.Errorf("sqlite store: database is nil")
@@ -86,7 +75,6 @@ func (s *SQLiteEventStore) LoadAll() ([]EventEnvelope, error) {
 	return out, nil
 }
 
-// Close is a no-op as the DB is managed externally (by Manager/App).
 func (s *SQLiteEventStore) Close() error {
 	return nil
 }

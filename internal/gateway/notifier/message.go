@@ -7,13 +7,11 @@ import (
 
 const maxStructuredMessageLen = 3800
 
-// MessageSection 表示通知中的一个段落。
 type MessageSection struct {
 	Title string
 	Lines []string
 }
 
-// StructuredMessage 描述统一格式的 Telegram 推送。
 type StructuredMessage struct {
 	Icon      string
 	Title     string
@@ -22,7 +20,6 @@ type StructuredMessage struct {
 	Timestamp time.Time
 }
 
-// RenderMarkdown 生成 Markdown 文本，自动裁剪长度。
 func (m StructuredMessage) RenderMarkdown() string {
 	var b strings.Builder
 	header := strings.TrimSpace(strings.TrimSpace(m.Icon + " " + m.Title))

@@ -8,21 +8,14 @@ import (
 	"brale/internal/logger"
 )
 
-// 配置驱动的 Provider 工厂（不再使用环境变量）。
-
-// 中文说明：
-// 根据配置构造模型提供方列表；若未显式提供 id，则自动生成稳定 ID，避免日志为空。
-
-// BuildMCPProviders 简化工厂：按 flags 启用 deepseek/qwen 两类 provider
 type ModelCfg struct {
 	ID, Provider, APIURL, APIKey, Model string
 	Enabled                             bool
-	Headers                             map[string]string // 额外请求头（如 X-API-Key / Organization）
+	Headers                             map[string]string
 	SupportsVision                      bool
 	ExpectJSON                          bool
 }
 
-// BuildProvidersFromConfig 根据配置文件的模型条目构造 Provider 列表
 func BuildProvidersFromConfig(models []ModelCfg, timeout time.Duration) []ModelProvider {
 	out := make([]ModelProvider, 0, len(models))
 	for _, m := range models {

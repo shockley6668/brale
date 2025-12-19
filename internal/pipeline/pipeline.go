@@ -10,13 +10,11 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// Pipeline 负责按 stage 调度一组中间件。
 type Pipeline struct {
 	name   string
 	stages [][]Middleware
 }
 
-// New 创建 Pipeline，并按 stage 归类中间件。
 func New(name string, middlewares ...Middleware) *Pipeline {
 	if len(middlewares) == 0 {
 		return &Pipeline{name: name, stages: nil}
@@ -41,7 +39,6 @@ func New(name string, middlewares ...Middleware) *Pipeline {
 	return &Pipeline{name: name, stages: stages}
 }
 
-// Run 执行 pipeline。
 func (p *Pipeline) Run(ctx context.Context, ac *AnalysisContext) error {
 	if ac == nil {
 		return fmt.Errorf("nil analysis context")

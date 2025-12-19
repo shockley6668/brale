@@ -15,12 +15,10 @@ import (
 	"gorm.io/gorm/logger"
 )
 
-// SqliteStore implements store.Store using SQLite and GORM.
 type SqliteStore struct {
 	db *gorm.DB
 }
 
-// NewSqliteStore creates a new SqliteStore.
 func NewSqliteStore(path string) (*SqliteStore, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -41,7 +39,6 @@ func NewSqliteStore(path string) (*SqliteStore, error) {
 	return newSqliteStore(db)
 }
 
-// NewSqliteStoreFromDB 复用已有 gorm.DB。
 func NewSqliteStoreFromDB(db *gorm.DB) (*SqliteStore, error) {
 	if db == nil {
 		return nil, fmt.Errorf("gorm db 不能为空")
@@ -59,15 +56,13 @@ func newSqliteStore(db *gorm.DB) (*SqliteStore, error) {
 		return nil, err
 	}
 	if sqlDB, err := db.DB(); err == nil {
-		// Do not force single-connection on a shared DB handle: it can stall concurrent HTTP reads.
-		// Keep it small to avoid excessive SQLite lock contention.
+
 		sqlDB.SetMaxOpenConns(2)
 		sqlDB.SetMaxIdleConns(2)
 	}
 	return &SqliteStore{db: db}, nil
 }
 
-// Begin starts a new UnitOfWork.
 func (s *SqliteStore) Begin(ctx context.Context) (store.UnitOfWork, error) {
 	tx := s.db.WithContext(ctx).Begin()
 	if tx.Error != nil {
@@ -76,7 +71,6 @@ func (s *SqliteStore) Begin(ctx context.Context) (store.UnitOfWork, error) {
 	return &gormUnitOfWork{tx: tx}, nil
 }
 
-// Close closes the database connection.
 func (s *SqliteStore) Close() error {
 	if s.db == nil {
 		return nil
@@ -88,7 +82,6 @@ func (s *SqliteStore) Close() error {
 	return sqlDB.Close()
 }
 
-// gormUnitOfWork implements store.UnitOfWork.
 type gormUnitOfWork struct {
 	tx *gorm.DB
 }
@@ -109,7 +102,6 @@ func (u *gormUnitOfWork) Commit() error {
 	return u.tx.Commit().Error
 }
 
-// Rollback 回滚事务。
 func (u *gormUnitOfWork) Rollback() error {
 	return u.tx.Rollback().Error
 }

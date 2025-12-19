@@ -5,7 +5,6 @@ import (
 	"strings"
 )
 
-// validate 对配置进行基础校验。
 func validate(c *Config) error {
 	if err := c.AI.validate(); err != nil {
 		return err
@@ -170,7 +169,6 @@ func (t *TradingConfig) validate() error {
 	return nil
 }
 
-// IsValidInterval 简易校验：以数字开头，以 m/h/d/w 结尾
 func IsValidInterval(s string) bool {
 	if s == "" {
 		return false

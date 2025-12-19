@@ -32,7 +32,7 @@ func (a *Adapter) Name() string {
 func (a *Adapter) OpenPosition(ctx context.Context, req exchange.OpenRequest) (*exchange.OpenResult, error) {
 
 	payload := ForceEnterPayload{
-		Pair:        a.toFreqtradePair(req.Symbol), // Use normalized symbol
+		Pair:        a.toFreqtradePair(req.Symbol),
 		Side:        req.Side,
 		StakeAmount: req.Amount,
 		OrderType:   req.OrderType,
@@ -58,8 +58,6 @@ func (a *Adapter) OpenPosition(ctx context.Context, req exchange.OpenRequest) (*
 }
 
 func (a *Adapter) ClosePosition(ctx context.Context, req exchange.CloseRequest) error {
-	// 1. Find active trade for symbol if ID is not provided
-	// Ideally req.PositionID should be provided. But we support finding by symbol.
 
 	tradeID := req.PositionID
 	if tradeID == "" && req.Symbol != "" {
@@ -68,7 +66,7 @@ func (a *Adapter) ClosePosition(ctx context.Context, req exchange.CloseRequest) 
 			return fmt.Errorf("failed to list trades to find close target: %w", err)
 		}
 		for _, t := range trades {
-			if strings.EqualFold(a.fromFreqtradePair(t.Pair), req.Symbol) && t.IsOpen { // Compare normalized symbols
+			if strings.EqualFold(a.fromFreqtradePair(t.Pair), req.Symbol) && t.IsOpen {
 				tradeID = strconv.Itoa(t.ID)
 				break
 			}
@@ -105,7 +103,7 @@ func (a *Adapter) ListOpenPositions(ctx context.Context) ([]exchange.Position, e
 	}
 	positions := make([]exchange.Position, 0, len(trades))
 	for _, tr := range trades {
-		if p := a.tradeToExchangePosition(&tr); p != nil { // Use adapter method
+		if p := a.tradeToExchangePosition(&tr); p != nil {
 			positions = append(positions, *p)
 		}
 	}
@@ -126,13 +124,13 @@ func (a *Adapter) GetPosition(ctx context.Context, positionID string) (*exchange
 
 	tr, err := a.client.GetTrade(ctx, id)
 	if err != nil {
-		// handle not found
+
 		return nil, err
 	}
 	if tr == nil {
 		return nil, nil
 	}
-	pos := a.tradeToExchangePosition(tr) // Use adapter method
+	pos := a.tradeToExchangePosition(tr)
 	return pos, nil
 }
 
@@ -147,7 +145,6 @@ func (a *Adapter) GetPrice(ctx context.Context, symbol string) (exchange.PriceQu
 	return exchange.PriceQuote{}, fmt.Errorf("GetPrice not implemented for freqtrade")
 }
 
-// toFreqtradePair converts an internal symbol (e.g., "ETH/USDT") to a Freqtrade-specific pair (e.g., "ETH/USDT:USDT").
 func (a *Adapter) toFreqtradePair(sym string) string {
 	stakeCurrency := ""
 	if a.cfg != nil {
@@ -156,7 +153,6 @@ func (a *Adapter) toFreqtradePair(sym string) string {
 	return symbolpkg.Freqtrade(stakeCurrency).ToExchange(sym)
 }
 
-// fromFreqtradePair converts a Freqtrade pair (e.g., "ETH/USDT:USDT") to an internal symbol (e.g., "ETH/USDT").
 func (a *Adapter) fromFreqtradePair(ftPair string) string {
 	stakeCurrency := ""
 	if a.cfg != nil {
@@ -165,7 +161,6 @@ func (a *Adapter) fromFreqtradePair(ftPair string) string {
 	return symbolpkg.Freqtrade(stakeCurrency).FromExchange(ftPair)
 }
 
-// tradeToExchangePosition helper converts Freqtrade trade to exchange.Position
 func (a *Adapter) tradeToExchangePosition(t *Trade) *exchange.Position {
 	if t == nil {
 		return nil
@@ -179,7 +174,7 @@ func (a *Adapter) tradeToExchangePosition(t *Trade) *exchange.Position {
 
 	return &exchange.Position{
 		ID:          strconv.Itoa(t.ID),
-		Symbol:      a.fromFreqtradePair(t.Pair), // Use normalized symbol
+		Symbol:      a.fromFreqtradePair(t.Pair),
 		Side:        side,
 		Amount:      t.Amount,
 		EntryPrice:  t.OpenRate,

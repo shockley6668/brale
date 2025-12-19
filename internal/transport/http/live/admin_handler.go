@@ -91,7 +91,7 @@ var adminTemplateFuncs = template.FuncMap{
 		return fmt.Sprintf("%.2f%%", val*100)
 	},
 	"formatPrice": func(val float64) string {
-		// 简单的价格格式化，后续可优化
+
 		if val < 1 {
 			return fmt.Sprintf("%.5f", val)
 		}
@@ -138,7 +138,6 @@ var adminTemplateFuncs = template.FuncMap{
 	},
 }
 
-// registerAdminRoutes 注册管理后台的 HTML 路由。
 func registerAdminRoutes(router *gin.Engine, logs *database.DecisionLogStore, freq FreqtradeWebhookHandler, defaultSymbols []string, symbolDetails map[string]SymbolDetail) {
 	h := &adminHandler{
 		logs:           logs,
@@ -147,7 +146,6 @@ func registerAdminRoutes(router *gin.Engine, logs *database.DecisionLogStore, fr
 		symbolDetails:  symbolDetails,
 	}
 
-	// 添加模板辅助函数
 	router.SetFuncMap(adminTemplateFuncs)
 
 	router.GET("/", func(c *gin.Context) {
@@ -177,7 +175,6 @@ type adminHandler struct {
 	symbolDetails  map[string]SymbolDetail
 }
 
-// renderApp 输出统一的 Vue 容器模板，前端自行通过 API 获取数据。
 func (h *adminHandler) renderApp(c *gin.Context, view string, extras gin.H) {
 	payload := gin.H{
 		"InitialView":    view,
@@ -190,13 +187,11 @@ func (h *adminHandler) renderApp(c *gin.Context, view string, extras gin.H) {
 	c.HTML(http.StatusOK, "index.html", payload)
 }
 
-// 1. 桌面主页
 func (h *adminHandler) renderDesk(c *gin.Context) {
 	logger.Infof("[admin] desk refresh ip=%s", c.ClientIP())
 	h.renderApp(c, "desk", nil)
 }
 
-// 2. 决策档案 (Blue Book)
 func (h *adminHandler) renderDecisions(c *gin.Context) {
 	if h.logs == nil {
 		c.String(http.StatusServiceUnavailable, "Logs not available")
@@ -208,7 +203,6 @@ func (h *adminHandler) renderDecisions(c *gin.Context) {
 	})
 }
 
-// 3. 作战地图 (Red Book)
 func (h *adminHandler) renderPositions(c *gin.Context) {
 	if h.freq == nil {
 		c.String(http.StatusServiceUnavailable, "Freqtrade handler not available")
@@ -220,7 +214,6 @@ func (h *adminHandler) renderPositions(c *gin.Context) {
 	})
 }
 
-// 4. 决策详情
 func (h *adminHandler) renderDecisionDetail(c *gin.Context) {
 	if h.logs == nil {
 		c.String(http.StatusServiceUnavailable, "Logs not available")
@@ -238,7 +231,6 @@ func (h *adminHandler) renderDecisionDetail(c *gin.Context) {
 	})
 }
 
-// 5. 仓位详情 (包含日志和设置)
 func (h *adminHandler) renderPositionDetail(c *gin.Context) {
 	if h.freq == nil {
 		c.String(http.StatusServiceUnavailable, "Freqtrade handler not available")

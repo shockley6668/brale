@@ -17,98 +17,11 @@ type derivedExitPrices struct {
 }
 
 func deriveExitPricesFromStrategyInstances(recs []database.StrategyInstanceRecord, side string, currentPrice float64) derivedExitPrices {
-	side = strings.ToLower(strings.TrimSpace(side))
-	entry := 0.0
-	rootSL := 0.0
-	rootTP := 0.0
-
-	var slTargets []float64
-	var tpTargets []float64
-
+	d := newExitDerivation(side)
 	for _, rec := range recs {
-		component := strings.TrimSpace(rec.PlanComponent)
-		if component == "" {
-			state, err := exit.DecodeTierPlanState(rec.StateJSON)
-			if err != nil {
-				continue
-			}
-			if entry <= 0 && state.EntryPrice > 0 {
-				entry = state.EntryPrice
-			}
-			if side == "" && strings.TrimSpace(state.Side) != "" {
-				side = strings.ToLower(strings.TrimSpace(state.Side))
-			}
-			if rootSL <= 0 {
-				switch {
-				case state.FinalStopLoss > 0:
-					rootSL = state.FinalStopLoss
-				case state.StopLossPrice > 0:
-					rootSL = state.StopLossPrice
-				case state.TrailingStopPrice > 0:
-					rootSL = state.TrailingStopPrice
-				}
-			}
-			if rootTP <= 0 {
-				switch {
-				case state.FinalTakeProfit > 0:
-					rootTP = state.FinalTakeProfit
-				case state.TakeProfitPrice > 0:
-					rootTP = state.TakeProfitPrice
-				}
-			}
-			continue
-		}
-
-		state, err := exit.DecodeTierComponentState(rec.StateJSON)
-		if err != nil {
-			continue
-		}
-		if entry <= 0 && state.EntryPrice > 0 {
-			entry = state.EntryPrice
-		}
-		if side == "" && strings.TrimSpace(state.Side) != "" {
-			side = strings.ToLower(strings.TrimSpace(state.Side))
-		}
-		if state.TargetPrice <= 0 {
-			continue
-		}
-
-		status := strings.ToLower(strings.TrimSpace(state.Status))
-		if status == "done" || status == "triggered" {
-			continue
-		}
-
-		mode := strings.ToLower(strings.TrimSpace(state.Mode))
-		if mode == "" {
-			lc := strings.ToLower(component)
-			switch {
-			case strings.Contains(lc, "sl") || strings.Contains(lc, "stop"):
-				mode = "stop_loss"
-			case strings.Contains(lc, "tp") || strings.Contains(lc, "take"):
-				mode = "take_profit"
-			}
-		}
-		switch mode {
-		case "stop_loss":
-			slTargets = append(slTargets, state.TargetPrice)
-		case "take_profit":
-			tpTargets = append(tpTargets, state.TargetPrice)
-		}
+		d.absorbStrategyInstance(rec)
 	}
-
-	ref := currentPrice
-	if ref <= 0 {
-		ref = entry
-	}
-
-	out := derivedExitPrices{StopLoss: rootSL, TakeProfit: rootTP}
-	if out.StopLoss <= 0 && len(slTargets) > 0 {
-		out.StopLoss = pickNextStopLoss(slTargets, side, ref)
-	}
-	if out.TakeProfit <= 0 && len(tpTargets) > 0 {
-		out.TakeProfit = pickNextTakeProfit(tpTargets, side, ref)
-	}
-	return out
+	return d.finalize(currentPrice)
 }
 
 func (m *Manager) hydrateAPIPositionExits(ctx context.Context, positions []exchange.APIPosition) {
@@ -261,4 +174,133 @@ func pickNearest(sorted []float64, ref float64) float64 {
 		}
 	}
 	return best
+}
+
+type exitDerivation struct {
+	side      string
+	entry     float64
+	rootSL    float64
+	rootTP    float64
+	slTargets []float64
+	tpTargets []float64
+}
+
+func newExitDerivation(side string) *exitDerivation {
+	return &exitDerivation{side: strings.ToLower(strings.TrimSpace(side))}
+}
+
+func (d *exitDerivation) absorbStrategyInstance(rec database.StrategyInstanceRecord) {
+	component := strings.TrimSpace(rec.PlanComponent)
+	if component == "" {
+		state, err := exit.DecodeTierPlanState(rec.StateJSON)
+		if err != nil {
+			return
+		}
+		d.absorbTierPlanState(state)
+		return
+	}
+
+	state, err := exit.DecodeTierComponentState(rec.StateJSON)
+	if err != nil {
+		return
+	}
+	d.absorbTierComponentState(component, state)
+}
+
+func (d *exitDerivation) absorbTierPlanState(state exit.TierPlanState) {
+	d.maybeSetEntrySide(state.EntryPrice, state.Side)
+
+	if d.rootSL <= 0 {
+		d.rootSL = pickRootStopLoss(state)
+	}
+	if d.rootTP <= 0 {
+		d.rootTP = pickRootTakeProfit(state)
+	}
+}
+
+func (d *exitDerivation) absorbTierComponentState(component string, state exit.TierComponentState) {
+	d.maybeSetEntrySide(state.EntryPrice, state.Side)
+	if state.TargetPrice <= 0 {
+		return
+	}
+	if isComponentDone(state.Status) {
+		return
+	}
+
+	mode := inferComponentMode(component, state.Mode)
+	switch mode {
+	case "stop_loss":
+		d.slTargets = append(d.slTargets, state.TargetPrice)
+	case "take_profit":
+		d.tpTargets = append(d.tpTargets, state.TargetPrice)
+	}
+}
+
+func (d *exitDerivation) maybeSetEntrySide(entryPrice float64, side string) {
+	if d.entry <= 0 && entryPrice > 0 {
+		d.entry = entryPrice
+	}
+	if d.side == "" && strings.TrimSpace(side) != "" {
+		d.side = strings.ToLower(strings.TrimSpace(side))
+	}
+}
+
+func pickRootStopLoss(state exit.TierPlanState) float64 {
+	switch {
+	case state.FinalStopLoss > 0:
+		return state.FinalStopLoss
+	case state.StopLossPrice > 0:
+		return state.StopLossPrice
+	case state.TrailingStopPrice > 0:
+		return state.TrailingStopPrice
+	default:
+		return 0
+	}
+}
+
+func pickRootTakeProfit(state exit.TierPlanState) float64 {
+	switch {
+	case state.FinalTakeProfit > 0:
+		return state.FinalTakeProfit
+	case state.TakeProfitPrice > 0:
+		return state.TakeProfitPrice
+	default:
+		return 0
+	}
+}
+
+func isComponentDone(status string) bool {
+	status = strings.ToLower(strings.TrimSpace(status))
+	return status == "done" || status == "triggered"
+}
+
+func inferComponentMode(component string, mode string) string {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode != "" {
+		return mode
+	}
+	lc := strings.ToLower(component)
+	switch {
+	case strings.Contains(lc, "sl") || strings.Contains(lc, "stop"):
+		return "stop_loss"
+	case strings.Contains(lc, "tp") || strings.Contains(lc, "take"):
+		return "take_profit"
+	default:
+		return ""
+	}
+}
+
+func (d *exitDerivation) finalize(currentPrice float64) derivedExitPrices {
+	ref := currentPrice
+	if ref <= 0 {
+		ref = d.entry
+	}
+	out := derivedExitPrices{StopLoss: d.rootSL, TakeProfit: d.rootTP}
+	if out.StopLoss <= 0 && len(d.slTargets) > 0 {
+		out.StopLoss = pickNextStopLoss(d.slTargets, d.side, ref)
+	}
+	if out.TakeProfit <= 0 && len(d.tpTargets) > 0 {
+		out.TakeProfit = pickNextTakeProfit(d.tpTargets, d.side, ref)
+	}
+	return out
 }

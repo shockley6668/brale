@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
-// MockExecutionManager ...
 type MockExecutionManager struct {
 	mock.Mock
 }
@@ -27,7 +26,6 @@ func (m *MockExecutionManager) AccountBalance() exchange.Balance {
 
 func (m *MockExecutionManager) SetPlanUpdateHook(exchange.PlanUpdateHook) {}
 
-// Add other Mock methods as needed (stubs since interface is large)
 func (m *MockExecutionManager) SyncStrategyPlans(ctx context.Context, tradeID int, plans any) error {
 	return nil
 }
@@ -59,6 +57,7 @@ func (m *MockExecutionManager) ListOpenPositions(ctx context.Context) ([]exchang
 	return args.Get(0).([]exchange.Position), args.Error(1)
 }
 func (m *MockExecutionManager) TradeIDBySymbol(string) (int, bool) { return 0, false }
+func (m *MockExecutionManager) EntryPriceBySymbol(string) float64  { return 0 }
 func (m *MockExecutionManager) CacheDecision(key string, _ decision.Decision) string {
 	return key
 }
@@ -69,17 +68,11 @@ func TestPositionService_GetAccountSnapshot(t *testing.T) {
 	svc := NewService(mockExec)
 
 	t.Run("Snapshot Success", func(t *testing.T) {
-		// Mock ListOpenPositions which is called by ListPositions -> GetAccountSnapshot uses simple mock?
-		// Wait, GetAccountSnapshot in PositionService returns generic snapshot for now.
-		// It doesn't call manager yet in the simplified version I wrote?
-		// Let's check service.go content. I recall it just returned dummy or simple data if manager didn't provide it.
-		// Actually GetAccountSnapshot in PositionService calls s.manager.ListOpenPositions? No.
-		// It returns generic info.
 
 		snap, err := svc.GetAccountSnapshot(context.Background())
 		assert.NoError(t, err)
 		assert.NotNil(t, snap)
-		// Assuming default implementation returns some data
+
 	})
 }
 

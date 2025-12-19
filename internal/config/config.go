@@ -9,12 +9,8 @@ import (
 	"github.com/spf13/viper"
 )
 
-// AIDecisionRunImmediately 控制 AI 决策循环启动时是否“立刻先跑一轮”（不等待对齐到 K 线收盘）。
-//
-// 默认 false：避免进程刚启动时使用未收盘/未稳定的数据触发噪音决策或重复执行。
 const AIDecisionRunImmediately = false
 
-// Load 读取并解析配置文件（支持 include），并设置缺省值与基本校验。
 func Load(path string) (*Config, error) {
 	files, err := resolveConfigIncludes(path)
 	if err != nil {

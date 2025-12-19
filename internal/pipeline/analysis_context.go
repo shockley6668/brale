@@ -9,7 +9,6 @@ import (
 	"brale/internal/types"
 )
 
-// AnalysisContext 表示某个 symbol 在一次 Pipeline 执行过程中的上下文。
 type AnalysisContext struct {
 	Symbol     string
 	Profile    string
@@ -25,7 +24,6 @@ type AnalysisContext struct {
 	metadata  map[string]any
 }
 
-// NewContext 初始化上下文。
 func NewContext(symbol string) *AnalysisContext {
 	return &AnalysisContext{
 		Symbol:     strings.ToUpper(strings.TrimSpace(symbol)),
@@ -37,14 +35,12 @@ func NewContext(symbol string) *AnalysisContext {
 	}
 }
 
-// SetMetadata 写入任意键值。
 func (ac *AnalysisContext) SetMetadata(key string, value any) {
 	ac.mu.Lock()
 	defer ac.mu.Unlock()
 	ac.metadata[key] = value
 }
 
-// Metadata 获取全部信息的副本。
 func (ac *AnalysisContext) Metadata() map[string]any {
 	ac.mu.RLock()
 	defer ac.mu.RUnlock()
@@ -55,7 +51,6 @@ func (ac *AnalysisContext) Metadata() map[string]any {
 	return out
 }
 
-// SetCandles 保存一个周期的 K 线。
 func (ac *AnalysisContext) SetCandles(interval string, candles []market.Candle) {
 	ac.mu.Lock()
 	defer ac.mu.Unlock()
@@ -69,7 +64,6 @@ func (ac *AnalysisContext) SetCandles(interval string, candles []market.Candle) 
 	ac.intervals[normalized] = dst
 }
 
-// Candles 读取一个周期的 K 线副本。
 func (ac *AnalysisContext) Candles(interval string) []market.Candle {
 	ac.mu.RLock()
 	defer ac.mu.RUnlock()
@@ -83,7 +77,6 @@ func (ac *AnalysisContext) Candles(interval string) []market.Candle {
 	return out
 }
 
-// Intervals 返回已有的周期列表。
 func (ac *AnalysisContext) Intervals() []string {
 	ac.mu.RLock()
 	defer ac.mu.RUnlock()
@@ -94,7 +87,6 @@ func (ac *AnalysisContext) Intervals() []string {
 	return out
 }
 
-// AddFeature 记录一个新的特征描述。
 func (ac *AnalysisContext) AddFeature(f Feature) {
 	if f.Metadata == nil {
 		f.Metadata = make(map[string]any)
@@ -104,7 +96,6 @@ func (ac *AnalysisContext) AddFeature(f Feature) {
 	ac.features = append(ac.features, f)
 }
 
-// Features 返回特征的副本。
 func (ac *AnalysisContext) Features() []Feature {
 	ac.mu.RLock()
 	defer ac.mu.RUnlock()
@@ -113,7 +104,6 @@ func (ac *AnalysisContext) Features() []Feature {
 	return out
 }
 
-// AppendPromptPart 附加结构化 prompt 片段。
 func (ac *AnalysisContext) AppendPromptPart(section string, lines ...string) {
 	if len(lines) == 0 {
 		return
@@ -127,7 +117,6 @@ func (ac *AnalysisContext) AppendPromptPart(section string, lines ...string) {
 	ac.prompts[sec] = append(ac.prompts[sec], lines...)
 }
 
-// PromptParts 返回所有 prompt 片段。
 func (ac *AnalysisContext) PromptParts() map[string][]string {
 	ac.mu.RLock()
 	defer ac.mu.RUnlock()
@@ -140,7 +129,6 @@ func (ac *AnalysisContext) PromptParts() map[string][]string {
 	return out
 }
 
-// AddWarning 记录警告。
 func (ac *AnalysisContext) AddWarning(msg string) {
 	msg = strings.TrimSpace(msg)
 	if msg == "" {
@@ -151,7 +139,6 @@ func (ac *AnalysisContext) AddWarning(msg string) {
 	ac.warnings = append(ac.warnings, msg)
 }
 
-// Warnings 获取告警列表。
 func (ac *AnalysisContext) Warnings() []string {
 	ac.mu.RLock()
 	defer ac.mu.RUnlock()
@@ -160,5 +147,4 @@ func (ac *AnalysisContext) Warnings() []string {
 	return out
 }
 
-// Feature 兼容旧引用，实际定义位于 internal/types。
 type Feature = types.Feature

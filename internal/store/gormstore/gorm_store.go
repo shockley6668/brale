@@ -36,15 +36,12 @@ type (
 	LivePositionStore       = database.LivePositionStore
 )
 
-// GormStore implements strategy and position storage using Gorm + SQLite.
 type GormStore struct {
 	db *gorm.DB
 }
 
-// GormStrategyStore is an alias for backward compatibility.
 type GormStrategyStore = GormStore
 
-// NewGormStore initializes a new GormStore instance.
 func NewGormStore(path string) (*GormStore, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -76,19 +73,16 @@ func NewGormStore(path string) (*GormStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	// SQLite + WAL: allow a small amount of parallelism for concurrent HTTP reads
-	// while keeping lock contention low.
+
 	sqlDB.SetMaxOpenConns(2)
 	sqlDB.SetMaxIdleConns(2)
 	return &GormStore{db: db}, nil
 }
 
-// NewGormStrategyStore is equivalent to NewGormStore.
 func NewGormStrategyStore(path string) (*GormStore, error) {
 	return NewGormStore(path)
 }
 
-// Close closes the underlying database connection.
 func (s *GormStore) Close() error {
 	if s == nil || s.db == nil {
 		return nil
@@ -100,7 +94,6 @@ func (s *GormStore) Close() error {
 	return sqlDB.Close()
 }
 
-// SQLDB exposes the underlying *sql.DB for shared connections.
 func (s *GormStore) SQLDB() (*sql.DB, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("gorm store 未初始化")
@@ -108,7 +101,6 @@ func (s *GormStore) SQLDB() (*sql.DB, error) {
 	return s.db.DB()
 }
 
-// GormDB exposes the underlying *gorm.DB (read-only reference).
 func (s *GormStore) GormDB() *gorm.DB {
 	if s == nil {
 		return nil
@@ -120,8 +112,6 @@ var (
 	_ LivePositionStore = (*GormStore)(nil)
 	_ LivePositionStore = (*GormStrategyStore)(nil)
 )
-
-// --------------------- StrategyInstance Implementation -------------------------
 
 func (s *GormStore) InsertStrategyInstances(ctx context.Context, recs []StrategyInstanceRecord) error {
 	if s == nil || s.db == nil || len(recs) == 0 {
@@ -169,8 +159,6 @@ func (s *GormStore) ListStrategyInstances(ctx context.Context, tradeID int) ([]S
 	return records, nil
 }
 
-// ListStrategyInstancesByTradeIDs batches strategy_instances lookup for multiple trades.
-// This avoids N+1 queries for list endpoints (e.g. desk positions snapshot).
 func (s *GormStore) ListStrategyInstancesByTradeIDs(ctx context.Context, tradeIDs []int) (map[int][]StrategyInstanceRecord, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("gorm store 未初始化")
@@ -236,8 +224,7 @@ func (s *GormStore) ActiveTradeIDs(ctx context.Context) ([]int, error) {
 		return nil, fmt.Errorf("gorm store 未初始化")
 	}
 	var ids []int
-	// JOIN with live_orders to ensure we only pick up trades that are NOT closed.
-	// This adds a safety layer against zombie strategies if FinalizeStrategies wasn't called.
+
 	err := s.db.WithContext(ctx).
 		Table("strategy_instances").
 		Joins("JOIN live_orders ON live_orders.freqtrade_id = strategy_instances.trade_id").
@@ -252,7 +239,6 @@ func (s *GormStore) ActiveTradeIDs(ctx context.Context) ([]int, error) {
 	return ids, nil
 }
 
-// FinalizeStrategies marks all active strategies for a trade as Done.
 func (s *GormStore) FinalizeStrategies(ctx context.Context, tradeID int) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("gorm store 未初始化")
@@ -268,8 +254,6 @@ func (s *GormStore) FinalizeStrategies(ctx context.Context, tradeID int) error {
 		}).Error
 }
 
-// FinalizePendingStrategies marks the oldest Pending tier component as Done.
-// Called on exit_fill webhook to confirm a single tier close was successful.
 func (s *GormStore) FinalizePendingStrategies(ctx context.Context, tradeID int) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("gorm store 未初始化")
@@ -319,8 +303,6 @@ func (s *GormStore) InsertStrategyChangeLog(ctx context.Context, rec StrategyCha
 	return s.db.WithContext(ctx).Create(&model).Error
 }
 
-// --------------------- LivePositionStore Implementation -----------------------
-
 func (s *GormStore) UpsertLiveOrder(ctx context.Context, rec LiveOrderRecord) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("gorm store 未初始化")
@@ -366,7 +348,7 @@ func (s *GormStore) UpdateOrderStatus(ctx context.Context, tradeID int, status L
 	if res.RowsAffected == 0 {
 		return gorm.ErrRecordNotFound
 	}
-	// 当订单状态变为 Closed 时，主动清理对应的策略实例
+
 	if status == database.LiveOrderStatusClosed {
 		_ = s.FinalizeStrategies(ctx, tradeID)
 	}
@@ -528,11 +510,9 @@ func (s *GormStore) CountRecentPositions(ctx context.Context, symbol string) (in
 }
 
 func (s *GormStore) AddOrderPnLColumns() error {
-	// gorm.AutoMigrate already handles fields.
+
 	return nil
 }
-
-// --------------------- Event Sourcing Implementation ----------------------
 
 func (s *GormStore) AppendEvent(ctx context.Context, evt EventRecord) error {
 	if s == nil || s.db == nil {
@@ -580,8 +560,6 @@ func (s *GormStore) LoadEvents(ctx context.Context, since time.Time, limit int) 
 	}
 	return out, nil
 }
-
-// --------------------------- Model Helpers ------------------------------
 
 func ensureDir(path string) error {
 	dir := filepathDir(path)
@@ -705,8 +683,6 @@ type eventLogModel struct {
 
 func (eventLogModel) TableName() string { return "event_log" }
 
-// --- Model Conversion Helpers ---
-
 func newLiveOrderModel(rec LiveOrderRecord) liveOrderModel {
 	now := time.Now()
 	if rec.CreatedAt.IsZero() {
@@ -806,8 +782,6 @@ func tradeOperationModelToRecord(m tradeOperationModel) TradeOperationRecord {
 		Timestamp:   millisToTime(m.Timestamp),
 	}
 }
-
-// --------------------------- Helper Functions ------------------------------------
 
 func mustJSONBytes(raw string) []byte {
 	raw = strings.TrimSpace(raw)

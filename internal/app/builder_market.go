@@ -133,7 +133,7 @@ func validateProfileDef(name string, def cfgloader.ProfileDefinition) error {
 	if estimateProfileLookback(def) <= 0 {
 		return fmt.Errorf("profile %s 缺少有效的分析窗口", name)
 	}
-	// Mandatory prompts validation
+
 	if strings.TrimSpace(def.Prompts.User) == "" {
 		return fmt.Errorf("profile %s 缺少 prompts.user 配置，必须为每个 profile 指定 user prompt", name)
 	}
@@ -179,57 +179,74 @@ func collectMiddlewareNeeds(name string, def cfgloader.ProfileDefinition, interv
 	for _, mw := range def.Middlewares {
 		switch strings.ToLower(strings.TrimSpace(mw.Name)) {
 		case "", "kline_fetcher":
-			klineIntervals := maputil.StringSlice(mw.Params, "intervals")
-			if len(klineIntervals) == 0 {
-				klineIntervals = ints
-			}
-			if len(klineIntervals) == 0 {
-				return fmt.Errorf("kline_fetcher 缺少 intervals")
-			}
-			limit := maputil.Int(mw.Params, "limit")
-			if limit <= 0 {
-				return fmt.Errorf("kline_fetcher 缺少 limit")
-			}
-			for _, iv := range klineIntervals {
-				norm := strings.ToLower(strings.TrimSpace(iv))
-				if norm == "" {
-					return fmt.Errorf("kline_fetcher 含空 interval")
-				}
-				if !brcfg.IsValidInterval(norm) {
-					return fmt.Errorf("kline_fetcher 包含无效 interval: %s", norm)
-				}
-				intervalSet[norm] = struct{}{}
-				if limit > lookbacks[norm] {
-					lookbacks[norm] = limit
-				}
+			if err := collectKlineFetcherNeeds(mw, ints, intervalSet, lookbacks); err != nil {
+				return fmt.Errorf("middleware %s: %w", mw.Name, err)
 			}
 		case "ema_trend", "rsi_extreme", "macd_trend":
-			interval := strings.ToLower(strings.TrimSpace(maputil.String(mw.Params, "interval")))
-			if interval == "" {
-				return fmt.Errorf("%s 缺少 interval", mw.Name)
+			if err := collectIndicatorNeeds(mw, intervalSet, lookbacks); err != nil {
+				return fmt.Errorf("middleware %s: %w", mw.Name, err)
 			}
-			if !brcfg.IsValidInterval(interval) {
-				return fmt.Errorf("%s interval 格式无效: %s", mw.Name, interval)
-			}
-			intervalSet[interval] = struct{}{}
+		}
+	}
+	return nil
+}
 
-			// Specific validations
-			if mw.Name == "ema_trend" {
-				if maputil.Int(mw.Params, "fast") <= 0 || maputil.Int(mw.Params, "mid") <= 0 || maputil.Int(mw.Params, "slow") <= 0 {
-					return fmt.Errorf("ema_trend 需设置 fast/mid/slow")
-				}
-			} else if mw.Name == "rsi_extreme" {
-				if maputil.Int(mw.Params, "period") <= 0 {
-					return fmt.Errorf("rsi_extreme 缺少 period")
-				}
-				if maputil.Float(mw.Params, "overbought") == 0 || maputil.Float(mw.Params, "oversold") == 0 {
-					return fmt.Errorf("rsi_extreme 需设置 overbought/oversold")
-				}
-			} else if mw.Name == "macd_trend" {
-				if maputil.Int(mw.Params, "fast") <= 0 || maputil.Int(mw.Params, "slow") <= 0 || maputil.Int(mw.Params, "signal") <= 0 {
-					return fmt.Errorf("macd_trend 需设置 fast/slow/signal")
-				}
-			}
+// collectKlineFetcherNeeds merges intervals/limits required by kline_fetcher middlewares.
+// Example: intervals=[1h,4h], limit=500 will ensure lookbacks[1h]=500 and 4h too.
+func collectKlineFetcherNeeds(mw cfgloader.MiddlewareConfig, defaultIntervals []string, intervalSet map[string]struct{}, lookbacks map[string]int) error {
+	klineIntervals := maputil.StringSlice(mw.Params, "intervals")
+	if len(klineIntervals) == 0 {
+		klineIntervals = defaultIntervals
+	}
+	if len(klineIntervals) == 0 {
+		return fmt.Errorf("kline_fetcher 缺少 intervals")
+	}
+	limit := maputil.Int(mw.Params, "limit")
+	if limit <= 0 {
+		return fmt.Errorf("kline_fetcher 缺少 limit")
+	}
+	for _, iv := range klineIntervals {
+		norm := strings.ToLower(strings.TrimSpace(iv))
+		if norm == "" {
+			return fmt.Errorf("kline_fetcher 含空 interval")
+		}
+		if !brcfg.IsValidInterval(norm) {
+			return fmt.Errorf("kline_fetcher 包含无效 interval: %s", norm)
+		}
+		intervalSet[norm] = struct{}{}
+		if limit > lookbacks[norm] {
+			lookbacks[norm] = limit
+		}
+	}
+	return nil
+}
+
+// collectIndicatorNeeds validates indicator middleware params and updates intervals/lookbacks.
+func collectIndicatorNeeds(mw cfgloader.MiddlewareConfig, intervalSet map[string]struct{}, lookbacks map[string]int) error {
+	interval := strings.ToLower(strings.TrimSpace(maputil.String(mw.Params, "interval")))
+	if interval == "" {
+		return fmt.Errorf("%s 缺少 interval", mw.Name)
+	}
+	if !brcfg.IsValidInterval(interval) {
+		return fmt.Errorf("%s interval 格式无效: %s", mw.Name, interval)
+	}
+	intervalSet[interval] = struct{}{}
+
+	switch strings.ToLower(strings.TrimSpace(mw.Name)) {
+	case "ema_trend":
+		if maputil.Int(mw.Params, "fast") <= 0 || maputil.Int(mw.Params, "mid") <= 0 || maputil.Int(mw.Params, "slow") <= 0 {
+			return fmt.Errorf("ema_trend 需设置 fast/mid/slow")
+		}
+	case "rsi_extreme":
+		if maputil.Int(mw.Params, "period") <= 0 {
+			return fmt.Errorf("rsi_extreme 缺少 period")
+		}
+		if maputil.Float(mw.Params, "overbought") == 0 || maputil.Float(mw.Params, "oversold") == 0 {
+			return fmt.Errorf("rsi_extreme 需设置 overbought/oversold")
+		}
+	case "macd_trend":
+		if maputil.Int(mw.Params, "fast") <= 0 || maputil.Int(mw.Params, "slow") <= 0 || maputil.Int(mw.Params, "signal") <= 0 {
+			return fmt.Errorf("macd_trend 需设置 fast/slow/signal")
 		}
 	}
 	return nil
@@ -243,40 +260,15 @@ func estimateProfileLookback(def cfgloader.ProfileDefinition) int {
 	return need
 }
 
-func logProfileMiddlewares(snapshot cfgloader.ProfileSnapshot) {
-	if len(snapshot.Profiles) == 0 {
-		return
-	}
-	names := make([]string, 0, len(snapshot.Profiles))
-	for name := range snapshot.Profiles {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		def := snapshot.Profiles[name]
-		logger.Infof("[profile %s] middlewares:", name)
-		if len(def.Middlewares) == 0 {
-			logger.Infof("  (none)")
-			continue
-		}
-		for _, mw := range def.Middlewares {
-			params := formatMiddlewareParams(mw.Params)
-			logger.Infof("  - %s stage=%d critical=%v timeout=%ds params=%s", strings.TrimSpace(mw.Name), mw.Stage, mw.Critical, mw.TimeoutSeconds, params)
-		}
-	}
-}
-
 func collectSymbolDetails(snapshot cfgloader.ProfileSnapshot, exitReg *exitplan.Registry) map[string]SymbolDetail {
 	out := make(map[string]SymbolDetail)
 
 	for name, def := range snapshot.Profiles {
-		// Middlewares
+
 		mws := summarizeMiddlewares(def.Middlewares)
 
-		// Strategies
 		strategies, exitSummary, exitCombos := summarizeExitPlans(def.ExitPlans.ComboKeys(), exitReg)
 
-		// Assign to each target symbol
 		sysPrompt := summarizeSystemPromptRefs(def.Prompts.SystemByModel)
 		userPrompt := strings.TrimSuffix(def.Prompts.User, ".txt")
 
@@ -389,7 +381,6 @@ func formatMiddlewareParams(params map[string]interface{}) string {
 	return strings.Join(parts, ", ")
 }
 
-// cloneParams 做一份浅拷贝，避免修改原始配置。
 func cloneParams(src map[string]interface{}) map[string]interface{} {
 	if len(src) == 0 {
 		return map[string]interface{}{}

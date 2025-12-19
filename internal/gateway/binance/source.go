@@ -20,7 +20,6 @@ import (
 
 const maxHistoryLimit = 1500
 
-// Source 基于 go-binance SDK 实现 market.Source。
 type Source struct {
 	cfg    Config
 	client *futures.Client
@@ -78,7 +77,7 @@ func (s *Source) FetchHistory(ctx context.Context, symbol, interval string, limi
 	if symbol == "" {
 		return nil, fmt.Errorf("symbol is required")
 	}
-	// Binance requires symbols without slashes (e.g., ETHUSDT)
+
 	cleanSymbol := symbolpkg.Binance.ToExchange(symbol)
 
 	interval = strings.ToLower(strings.TrimSpace(interval))
@@ -114,8 +113,7 @@ func (s *Source) FetchHistory(ctx context.Context, symbol, interval string, limi
 }
 
 func (s *Source) Subscribe(ctx context.Context, symbols, intervals []string, opts market.SubscribeOptions) (<-chan market.CandleEvent, error) {
-	// Create mapping: CLEAN_SYMBOL -> ORIGINAL_SYMBOL
-	// This ensures we subscribe with "ETHUSDT" but return "ETH/USDT" if that's what was requested.
+
 	symbolMap := make(map[string]string)
 	cleanSymbols := make([]string, 0, len(symbols))
 	for _, sym := range symbols {
@@ -206,7 +204,7 @@ func (s *Source) runKlineLoop(ctx context.Context, mapping map[string][]string, 
 			if !ok {
 				return
 			}
-			// Restore original symbol format
+
 			if original, ok := symbolMap[ce.Symbol]; ok {
 				ce.Symbol = original
 			}
@@ -278,7 +276,7 @@ func (s *Source) runTradeLoop(ctx context.Context, symbols []string, symbolMap m
 			if !ok {
 				return
 			}
-			// Restore original symbol format
+
 			if original, ok := symbolMap[te.Symbol]; ok {
 				te.Symbol = original
 			}
@@ -343,8 +341,6 @@ func (s *Source) Stats() market.SourceStats {
 	return s.stats
 }
 
-// ClearLastError resets the cached websocket error so downstream stats don't
-// keep reporting older failures after a successful reconnect.
 func (s *Source) ClearLastError() {
 	s.statsMu.Lock()
 	s.stats.LastError = ""

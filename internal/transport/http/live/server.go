@@ -18,13 +18,11 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// Server 提供最小化的 /api/live HTTP 服务（决策查询 + freqtrade webhook）。
 type Server struct {
 	addr   string
 	router *gin.Engine
 }
 
-// ServerConfig 描述 live HTTP 服务依赖。
 type ServerConfig struct {
 	Addr             string
 	Logs             *database.DecisionLogStore
@@ -34,7 +32,6 @@ type ServerConfig struct {
 	LogPaths         map[string]string
 }
 
-// NewServer 构建 live HTTP server。
 func NewServer(cfg ServerConfig) (*Server, error) {
 	if cfg.Logs == nil && cfg.FreqtradeHandler == nil {
 		return nil, errors.New("live http server requires logs or freqtrade handler")
@@ -49,10 +46,8 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	router := gin.New()
 	router.Use(gin.Recovery(), requestLogger())
 
-	// 先注册模板函数，再加载模板，否则自定义函数不可用
 	registerAdminRoutes(router, cfg.Logs, cfg.FreqtradeHandler, cfg.DefaultSymbols, cfg.SymbolDetails)
 
-	// 静态资源与模板
 	if err := loadTemplates(router); err != nil {
 		return nil, err
 	}
@@ -97,7 +92,7 @@ func loadTemplates(router *gin.Engine) error {
 		return nil
 	}
 	const embeddedTplBase = "templates"
-	// fallback to embedded templates
+
 	fsys, err := fs.Sub(webassets.Templates, embeddedTplBase)
 	if err != nil {
 		return err
@@ -142,7 +137,7 @@ func serveStatic(router *gin.Engine) error {
 			return nil
 		}
 	}
-	// fallback to embedded static assets
+
 	const embeddedStaticBase = "static"
 	sub, err := fs.Sub(webassets.Static, embeddedStaticBase)
 	if err != nil {
@@ -156,7 +151,6 @@ func serveStatic(router *gin.Engine) error {
 	return nil
 }
 
-// requestLogger 记录后台/接口的人工操作，便于追踪刷新与调用。
 func requestLogger() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
@@ -175,7 +169,6 @@ func requestLogger() gin.HandlerFunc {
 	}
 }
 
-// Addr 返回监听地址。
 func (s *Server) Addr() string {
 	if s == nil {
 		return ""
@@ -183,7 +176,6 @@ func (s *Server) Addr() string {
 	return s.addr
 }
 
-// Start 启动 HTTP 服务，直到 ctx 取消或出现错误。
 func (s *Server) Start(ctx context.Context) error {
 	if s == nil {
 		return nil

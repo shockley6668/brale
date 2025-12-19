@@ -11,51 +11,45 @@ import (
 	"brale/internal/logger"
 )
 
-// DerivativesData 包含 AI 决策需要的衍生品环境数据，如 OI 和资金费率
 type DerivativesData struct {
 	Symbol      string
-	OI          float64            // 最新 OI (从 History[0] 取)
-	OIHistory   map[string]float64 // 历史快照: key="1h", val=1小时前的OI
-	FundingRate float64            // 实时资金费率
+	OI          float64
+	OIHistory   map[string]float64
+	FundingRate float64
 	LastUpdate  time.Time
 	Error       string
 }
 
-// MetricsService 负责周期性从交易所拉取 OI/资金费率并缓存
 type MetricsService struct {
-	source  Source                     // 依赖抽象接口
-	cache   map[string]DerivativesData // 内存缓存
-	mu      sync.RWMutex               // 保护 cache
-	symbols []string                   // 需要监控的币种列表
+	source  Source
+	cache   map[string]DerivativesData
+	mu      sync.RWMutex
+	symbols []string
 
-	pollInterval           time.Duration // 后台轮询周期（仅用于 Start；按需刷新可不启动）
-	baseOIHistoryPeriod    string        // OI 历史拉取的基准周期 (例如 "15m", "1h")
-	oiHistoryLimit         int           // OI 历史拉取的数量 (例如 100, 30)
-	targetOIHistTimeframes []string      // 需要在 Prompt 中展示的 OI 历史周期 (例如 "1h", "4h", "1d")
+	pollInterval           time.Duration
+	baseOIHistoryPeriod    string
+	oiHistoryLimit         int
+	targetOIHistTimeframes []string
 }
 
-// GetTargetTimeframes 返回 MetricsService 关注的 OI 历史时间周期列表
 func (s *MetricsService) GetTargetTimeframes() []string {
 	return s.targetOIHistTimeframes
 }
 
-// BaseOIHistoryPeriod 返回 OI 历史拉取的基准周期
 func (s *MetricsService) BaseOIHistoryPeriod() string {
 	return s.baseOIHistoryPeriod
 }
 
-// OIHistoryLimit 返回 OI 历史拉取的数量
 func (s *MetricsService) OIHistoryLimit() int {
 	return s.oiHistoryLimit
 }
 
-// NewMetricsService Create MetricsService instance
 func NewMetricsService(
 	source Source,
 	symbols []string,
 	timeframes []string,
 ) (*MetricsService, error) {
-	// Filter empty symbol
+
 	validSymbols := make([]string, 0, len(symbols))
 	for _, s := range symbols {
 		s = strings.ToUpper(strings.TrimSpace(s))
@@ -64,10 +58,9 @@ func NewMetricsService(
 		}
 	}
 	if len(validSymbols) == 0 {
-		return nil, nil // No symbols requested, validly disabled
+		return nil, nil
 	}
 
-	// Merge all Timeframes and delete duplicates, used to determine the OI historical pull range
 	allTimeframes := normalizeTimeframes(timeframes)
 	if len(allTimeframes) == 0 {
 		return nil, fmt.Errorf("metrics configuration missing timeframes")
@@ -94,7 +87,6 @@ func NewMetricsService(
 	}, nil
 }
 
-// Get 从缓存中获取指定交易对的衍生品数据
 func (s *MetricsService) Get(symbol string) (DerivativesData, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -102,7 +94,6 @@ func (s *MetricsService) Get(symbol string) (DerivativesData, bool) {
 	return data, ok
 }
 
-// OI 从缓存获取指定交易对的未平仓量
 func (s *MetricsService) OI(ctx context.Context, symbol string) (float64, error) {
 	data, ok := s.Get(symbol)
 	if !ok {
@@ -114,7 +105,6 @@ func (s *MetricsService) OI(ctx context.Context, symbol string) (float64, error)
 	return data.OI, nil
 }
 
-// Funding 从缓存获取指定交易对的资金费率
 func (s *MetricsService) Funding(ctx context.Context, symbol string) (float64, error) {
 	data, ok := s.Get(symbol)
 	if !ok {
@@ -126,8 +116,6 @@ func (s *MetricsService) Funding(ctx context.Context, symbol string) (float64, e
 	return data.FundingRate, nil
 }
 
-// RefreshSymbol 立即刷新指定币种的衍生品数据（OI/Funding），并写入内存缓存。
-// 该方法用于“按 LLM 执行时间/按币种”更新衍生品数据，避免后台步进与决策调度耦合。
 func (s *MetricsService) RefreshSymbol(ctx context.Context, symbol string) {
 	if s == nil {
 		return
@@ -139,7 +127,6 @@ func (s *MetricsService) RefreshSymbol(ctx context.Context, symbol string) {
 	s.updateSymbol(ctx, symbol)
 }
 
-// Start 启动后台轮询，周期性更新缓存
 func (s *MetricsService) Start(ctx context.Context) {
 	count := len(s.symbols)
 	if count == 0 {
@@ -147,24 +134,19 @@ func (s *MetricsService) Start(ctx context.Context) {
 		return
 	}
 
-	// 计算请求步进：在决策周期的前 90% 时间内完成所有币种的更新
-	// 避免在决策前最后一刻还在请求，留出缓存更新的缓冲
 	effectiveInterval := s.pollInterval
-	if s.pollInterval > 10*time.Second { // 至少保留 10s 缓冲，或者 10%
+	if s.pollInterval > 10*time.Second {
 		effectiveInterval = s.pollInterval - (s.pollInterval / 10)
-		if effectiveInterval < 10*time.Second { // 最少有效周期不能太短
+		if effectiveInterval < 10*time.Second {
 			effectiveInterval = 10 * time.Second
 		}
-	} else if s.pollInterval == 0 { // 避免除零
-		effectiveInterval = 60 * time.Second // 默认 1分钟
+	} else if s.pollInterval == 0 {
+		effectiveInterval = 60 * time.Second
 	}
 
 	step := effectiveInterval / time.Duration(count)
 
-	// 最小请求间隔限制（防止币种太多导致间隔过短，刷爆 API）
-	// 根据 Binance 期货 API 的 /fapi/v1/openInterest 接口，单个请求是 20 weight。
-	// 推荐间隔至少 1s，以适应请求权重和网络延迟。
-	minStep := 1 * time.Second // 最短 1 秒钟发一个请求
+	minStep := 1 * time.Second
 	if step < minStep {
 		step = minStep
 		logger.Warnf("MetricsService 计算步进 %v 小于最小限制 %v，已调整为 %v。请注意：币种过多可能会导致轮询周期超过决策间隔。", effectiveInterval/time.Duration(count), minStep, step)
@@ -183,22 +165,18 @@ func (s *MetricsService) Start(ctx context.Context) {
 			logger.Infof("MetricsService 收到停止信号，优雅退出")
 			return
 		case <-ticker.C:
-			// 避免并发问题，确保在访问 s.symbols 之前加锁或保证不可变
-			symbolsCopy := s.symbols // 假设 s.symbols 在初始化后不会改变
+
+			symbolsCopy := s.symbols
 
 			if len(symbolsCopy) == 0 {
 				continue
 			}
 
-			// 循环获取当前要更新的币种
 			sym := symbolsCopy[cursor]
 
-			// 移动游标，环形循环
 			cursor = (cursor + 1) % len(symbolsCopy)
 
-			// 异步执行更新，避免阻塞 Ticker 节奏
-			// 使用独立的上下文，以便在服务停止时可以取消
-			updateCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second) // 设定一个合理的请求超时
+			updateCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			go func(sCtx context.Context, symbol string) {
 				defer cancel()
 				s.updateSymbol(sCtx, symbol)
@@ -207,7 +185,6 @@ func (s *MetricsService) Start(ctx context.Context) {
 	}
 }
 
-// updateSymbol 调用 source 获取数据并更新缓存
 func (s *MetricsService) updateSymbol(ctx context.Context, symbol string) {
 	var (
 		oiHist  []OpenInterestPoint
@@ -216,11 +193,9 @@ func (s *MetricsService) updateSymbol(ctx context.Context, symbol string) {
 		errFund error
 	)
 
-	// 并发获取 OI 历史和实时 Funding
 	var wg sync.WaitGroup
 	wg.Add(2)
 
-	// 获取 OI 历史数据
 	go func() {
 		defer wg.Done()
 		oiHist, errOI = s.source.GetOpenInterestHistory(ctx, symbol, s.baseOIHistoryPeriod, s.oiHistoryLimit)
@@ -229,7 +204,6 @@ func (s *MetricsService) updateSymbol(ctx context.Context, symbol string) {
 		}
 	}()
 
-	// 获取实时 Funding Rate
 	go func() {
 		defer wg.Done()
 		funding, errFund = s.source.GetFundingRate(ctx, symbol)
@@ -238,7 +212,7 @@ func (s *MetricsService) updateSymbol(ctx context.Context, symbol string) {
 		}
 	}()
 
-	wg.Wait() // 等待所有请求完成
+	wg.Wait()
 
 	newData := DerivativesData{
 		Symbol:     symbol,
@@ -248,13 +222,12 @@ func (s *MetricsService) updateSymbol(ctx context.Context, symbol string) {
 
 	var allErrors strings.Builder
 
-	// 处理 OI 历史数据
 	if errOI != nil {
 		allErrors.WriteString(fmt.Sprintf("获取OI历史失败: %v; ", errOI))
 	} else if len(oiHist) == 0 {
 		allErrors.WriteString("获取OI历史为空; ")
 	} else {
-		// 最新 OI 总是最后一个点 (假设 API 返回升序)
+
 		if len(oiHist) > 0 {
 			latestOI := oiHist[len(oiHist)-1].SumOpenInterest
 			newData.OI = latestOI
@@ -262,7 +235,6 @@ func (s *MetricsService) updateSymbol(ctx context.Context, symbol string) {
 			allErrors.WriteString("OI历史数据为空; ")
 		}
 
-		// 计算并存储历史 OI
 		for _, tf := range s.targetOIHistTimeframes {
 			duration, err := parseTimeframe(tf)
 			if err != nil {
@@ -270,18 +242,15 @@ func (s *MetricsService) updateSymbol(ctx context.Context, symbol string) {
 				continue
 			}
 
-			// targetTimestamp 应该是在当前时间基础上减去 duration
 			targetTime := time.Now().Add(-duration)
 
-			// 找到最接近 targetTime 的 OI 值
 			var oiAtPastTime float64
 			found := false
-			// OI历史数据通常是按时间升序的，从后往前找效率更高
+
 			for i := len(oiHist) - 1; i >= 0; i-- {
 				point := oiHist[i]
 				pointTime := time.UnixMilli(point.Timestamp)
 
-				// 找到第一个 timestamp 小于等于 targetTime 的点
 				if pointTime.Before(targetTime) || pointTime.Equal(targetTime) {
 					oiAtPastTime = point.SumOpenInterest
 					found = true
@@ -291,14 +260,13 @@ func (s *MetricsService) updateSymbol(ctx context.Context, symbol string) {
 			if found {
 				newData.OIHistory[tf] = oiAtPastTime
 			} else {
-				// 如果没有找到足够早的历史数据，则填0或日志警告
-				newData.OIHistory[tf] = 0 // 或者根据业务逻辑填-1, math.NaN等
+
+				newData.OIHistory[tf] = 0
 				logger.Debugf("MetricsService: %s 无法找到 %s 周期前的 OI 数据", symbol, tf)
 			}
 		}
 	}
 
-	// 处理 Funding Rate
 	if errFund != nil {
 		allErrors.WriteString(fmt.Sprintf("获取Funding失败: %v", errFund))
 	} else {
@@ -340,14 +308,12 @@ func normalizeTimeframes(items []string) []string {
 	return out
 }
 
-// calculateOIHistoryParams 根据 horizonTimeframes 计算最佳的 OI 历史拉取周期和数量
 func calculateOIHistoryParams(horizonTimeframes []string) (basePeriod string, limit int, targetTimeframes []string) {
 	if len(horizonTimeframes) == 0 {
 		return "", 0, nil
 	}
 
-	// 统一解析所有 timeframes 到 duration，并找到最小和最大
-	minDuration := time.Hour * 24 * 365 // 假设一年是最大值
+	minDuration := time.Hour * 24 * 365
 	maxDuration := time.Duration(0)
 
 	parsedDurations := make(map[string]time.Duration)
@@ -364,18 +330,17 @@ func calculateOIHistoryParams(horizonTimeframes []string) (basePeriod string, li
 
 		if d < minDuration {
 			minDuration = d
-			basePeriod = tf // 最小的 timeframe 作为基准拉取周期
+			basePeriod = tf
 		}
 		if d > maxDuration {
 			maxDuration = d
 		}
 	}
 
-	if basePeriod == "" || minDuration == 0 { // 极端情况，防止除零或无有效周期
+	if basePeriod == "" || minDuration == 0 {
 		return "", 0, nil
 	}
 
-	// Binance OI History 支持的周期
 	binanceOIPeriods := map[string]time.Duration{
 		"5m":  5 * time.Minute,
 		"15m": 15 * time.Minute,
@@ -388,9 +353,7 @@ func calculateOIHistoryParams(horizonTimeframes []string) (basePeriod string, li
 		"1d":  24 * time.Hour,
 	}
 
-	// 找到最接近且小于等于 minDuration 的 Binance 支持周期作为 basePeriod
-	// 避免用 30m 去拉 5m 的数据，这样会少很多请求
-	actualBasePeriod := "1h" // 默认 fallback
+	actualBasePeriod := "1h"
 	actualBaseDuration := 1 * time.Hour
 	for p, d := range binanceOIPeriods {
 		if d <= minDuration && d > actualBaseDuration {
@@ -400,17 +363,14 @@ func calculateOIHistoryParams(horizonTimeframes []string) (basePeriod string, li
 	}
 	basePeriod = actualBasePeriod
 
-	// 计算所需拉取的历史数据量
-	// 确保能覆盖最大周期，并留有余量
-	limit = int(maxDuration/actualBaseDuration) + 5 // 加 5 个缓冲
-	if limit < 10 {                                 // 最小拉取 10 条
+	limit = int(maxDuration/actualBaseDuration) + 5
+	if limit < 10 {
 		limit = 10
 	}
-	if limit > 500 { // Binance 最大 500
+	if limit > 500 {
 		limit = 500
 	}
 
-	// 最终需要展示的周期，用于 Prompt
 	targetTimeframes = allIntervals
 
 	logger.Infof("OI 历史拉取参数计算: BasePeriod=%s, Limit=%d, TargetTimeframes=%v", basePeriod, limit, targetTimeframes)

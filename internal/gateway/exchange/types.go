@@ -1,6 +1,3 @@
-// Package exchange defines a common abstraction for trading exchanges.
-// This allows the system to work with different exchange backends (Freqtrade, CCXT, etc.)
-// without changing the core execution logic.
 package exchange
 
 import (
@@ -8,89 +5,79 @@ import (
 	"time"
 )
 
-// Position represents a trading position on any exchange.
 type Position struct {
-	ID            string    // Exchange-specific trade/position ID
-	Symbol        string    // e.g., "BTC/USDT"
-	Side          string    // "long" or "short"
-	Amount        float64   // Current position size
-	InitialAmount float64   // Initial position size (for partial closes)
-	EntryPrice    float64   // Average entry price
-	Leverage      float64   // Position leverage
-	StakeAmount   float64   // Amount of stake currency used
-	OpenedAt      time.Time // When position was opened
-	UpdatedAt     time.Time // Last update timestamp
-	IsOpen        bool      // Whether position is still open
+	ID            string
+	Symbol        string
+	Side          string
+	Amount        float64
+	InitialAmount float64
+	EntryPrice    float64
+	Leverage      float64
+	StakeAmount   float64
+	OpenedAt      time.Time
+	UpdatedAt     time.Time
+	IsOpen        bool
 
-	// PnL fields
-	UnrealizedPnL      float64 // Unrealized profit/loss in quote currency
-	UnrealizedPnLRatio float64 // Unrealized P&L as ratio
-	RealizedPnL        float64 // Realized profit/loss (for partial closes)
-	RealizedPnLRatio   float64 // Realized P&L as ratio
-	CurrentPrice       float64 // Current market price
+	UnrealizedPnL      float64
+	UnrealizedPnLRatio float64
+	RealizedPnL        float64
+	RealizedPnLRatio   float64
+	CurrentPrice       float64
 
-	// Risk management
-	StopLoss   float64 // Stop loss price (0 if not set)
-	TakeProfit float64 // Take profit price (0 if not set)
+	StopLoss   float64
+	TakeProfit float64
 
-	// Raw data from exchange (for debugging/logging)
 	Raw map[string]any
 }
 
-// Balance represents account balance information.
 type Balance struct {
-	StakeCurrency string             // Primary stake currency (e.g., "USDT")
-	Total         float64            // Total balance
-	Available     float64            // Available for trading
-	Used          float64            // Currently in use (margin, etc.)
-	Wallets       map[string]float64 // Per-currency balances
-	UpdatedAt     time.Time          // When balance was last updated
-	Raw           map[string]any     // Raw data from exchange
+	StakeCurrency string
+	Total         float64
+	Available     float64
+	Used          float64
+	Wallets       map[string]float64
+	UpdatedAt     time.Time
+	Raw           map[string]any
 }
 
-// PriceQuote represents current price information.
 type PriceQuote struct {
 	Symbol    string
-	Last      float64   // Last traded price
-	Bid       float64   // Best bid price
-	Ask       float64   // Best ask price
-	High      float64   // 24h high
-	Low       float64   // 24h low
-	UpdatedAt time.Time // Quote timestamp
+	Last      float64
+	Bid       float64
+	Ask       float64
+	High      float64
+	Low       float64
+	UpdatedAt time.Time
 }
 
-// OpenRequest contains parameters for opening a position.
 type OpenRequest struct {
-	Symbol      string  // Trading pair (e.g., "BTC/USDT")
-	Side        string  // "long" or "short"
-	Amount      float64 // Position size (optional, use Stake if 0)
-	Stake       float64 // Stake amount in quote currency
-	Leverage    float64 // Leverage to use
-	Price       float64 // Limit price (0 for market order)
-	OrderType   string  // "market" or "limit"
-	Tag         string  // Optional entry tag/reason
-	ReduceOnly  bool    // Reduce only order
-	TimeInForce string  // "GTC", "IOC", "FOK"
+	Symbol      string
+	Side        string
+	Amount      float64
+	Stake       float64
+	Leverage    float64
+	Price       float64
+	OrderType   string
+	Tag         string
+	ReduceOnly  bool
+	TimeInForce string
 }
 
-// CloseRequest contains parameters for closing a position.
 type CloseRequest struct {
-	PositionID string  // Exchange-specific position/trade ID
-	Symbol     string  // Trading pair
-	Side       string  // Position side being closed
-	Amount     float64 // Amount to close (0 = close all)
-	Price      float64 // Limit price (0 for market order)
-	OrderType  string  // "market" or "limit"
-	Reason     string  // Close reason for logging
+	PositionID string
+	Symbol     string
+	Side       string
+	Amount     float64
+	Price      float64
+	OrderType  string
+	Reason     string
 }
 
-// OpenResult contains the result of an open position request.
 type OpenResult struct {
-	PositionID string // Exchange-assigned position/trade ID
-	OrderID    string // Order ID if applicable
+	PositionID string
+	OrderID    string
 }
 
-// ManualOpenRequest describes minimal fields for manual opening.
 type ManualOpenRequest struct {
 	Symbol          string  `json:"symbol" form:"symbol"`
 	Side            string  `json:"side" form:"side"`
@@ -119,12 +106,11 @@ type PositionListOptions struct {
 	Symbol      string
 	Page        int
 	PageSize    int
-	Status      string // active|closed|all (optional)
+	Status      string
 	IncludeLogs bool
 	LogsLimit   int
 }
 
-// APIPosition is a representation of a position suitable for API responses.
 type APIPosition struct {
 	TradeID            int     `json:"trade_id"`
 	Symbol             string  `json:"symbol"`
@@ -148,7 +134,7 @@ type APIPosition struct {
 	UnrealizedPnLUSD   float64 `json:"unrealized_pnl_usd"`
 	RemainingRatio     float64 `json:"remaining_ratio"`
 	Placeholder        bool    `json:"placeholder,omitempty"`
-	// Events             []TradeEvent           `json:"events,omitempty"` // Define TradeEvent if needed
+
 	Status     string  `json:"status"`
 	ClosedAt   int64   `json:"closed_at,omitempty"`
 	ExitPrice  float64 `json:"exit_price,omitempty"`
@@ -170,12 +156,10 @@ type TradeEvent struct {
 	Timestamp   time.Time      `json:"timestamp"`
 }
 
-// PlanUpdateHook interface for receiving plan update notifications
 type PlanUpdateHook interface {
 	NotifyPlanUpdated(context.Context, int)
 }
 
-// WebhookMessage structure
 type WebhookMessage struct {
 	Type        string  `json:"type"`
 	TradeID     int64   `json:"trade_id"`
@@ -193,7 +177,7 @@ type WebhookMessage struct {
 	ProfitRatio float64 `json:"profit_ratio"`
 	ProfitAbs   float64 `json:"profit_abs"`
 	ExitReason  string  `json:"exit_reason"`
-	Reason      string  `json:"reason"` // fallback for exit_reason
+	Reason      string  `json:"reason"`
 	Leverage    int     `json:"leverage"`
 }
 

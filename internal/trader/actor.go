@@ -21,9 +21,15 @@ import (
 
 const ()
 
-// Recover rebuilds the Trader's state by replaying events from the store.
-// It should be called before Start().
-// Recover rebuilds the Trader's state by hydrating from DB and then replaying events.
+// Recover rebuilds the Trader's in-memory state from the database.
+// This is critical for crash recovery to ensure we don't lose track of open positions or running strategies.
+//
+// Steps:
+// 1. Fetches open positions from the Exchange (Executor) -> syncExecutorPositions.
+// 2. Overlays state from the Database (LivePositionStore) -> hydrateFromDB.
+//   - This merges "technical" state (ID, price) with "business" state (entry reason, plan ID).
+//
+// 3. Reconstructs running Exit Strategies (Plans) from DB records.
 func (t *Trader) Recover() error {
 	ctx := context.Background()
 	t.state = NewState()
@@ -44,21 +50,25 @@ func (t *Trader) Recover() error {
 	return nil
 }
 
-// Trader is the core Actor managing state and adapter.
+// Trader is the core event-driven actor of the system.
+// It manages the lifecycle of positions, executes orders, and persists state.
+//
+// Architecture:
+// - Uses a single event loop (runLoop) to process events sequentially, avoiding race conditions.
+// - State is kept in-memory (Trader.state) but hydrated from DB on startup (Recover).
+// - Interacts with Exchange via Executor interface.
+// - Persists events to EventStore for sourcing/audit.
 type Trader struct {
-	// Dependencies
 	executor      exchange.Exchange
-	store         EventStore                 // Persist events
-	posStore      database.LivePositionStore // Persist state
-	registry      *exit.HandlerRegistry      // Exit strategies
-	eventRegistry *HandlerRegistry           // Event handlers
+	store         EventStore
+	posStore      database.LivePositionStore
+	registry      *exit.HandlerRegistry
+	eventRegistry *HandlerRegistry
 
-	// Channels
 	msgCh  chan EventEnvelope
 	stopCh chan struct{}
 	wg     sync.WaitGroup
 
-	// State (Thread-confined)
 	state *State
 
 	stateSnapshot    atomic.Value
@@ -66,13 +76,10 @@ type Trader struct {
 	lastSnapshot     time.Time
 }
 
-// NewTrader creates a new Trader actor.
-// store can be nil for in-memory only (e.g. tests or shadow mode without persistence).
 func NewTrader(exec exchange.Exchange, store EventStore, posStore database.LivePositionStore) *Trader {
 	reg := exit.NewHandlerRegistry()
 	handlers.RegisterCoreHandlers(reg)
 
-	// Create event handler registry
 	eventReg := NewHandlerRegistry()
 	eventReg.RegisterDefaultHandlers()
 
@@ -82,7 +89,7 @@ func NewTrader(exec exchange.Exchange, store EventStore, posStore database.LiveP
 		posStore:         posStore,
 		registry:         reg,
 		eventRegistry:    eventReg,
-		msgCh:            make(chan EventEnvelope, 100), // Buffered to handle bursts
+		msgCh:            make(chan EventEnvelope, 100),
 		stopCh:           make(chan struct{}),
 		state:            NewState(),
 		snapshotThrottle: 50 * time.Millisecond,
@@ -91,34 +98,30 @@ func NewTrader(exec exchange.Exchange, store EventStore, posStore database.LiveP
 	return tr
 }
 
-// Start launches the actor loop in a background goroutine.
 func (t *Trader) Start() {
 	t.wg.Add(1)
 	go t.runLoop()
 }
 
-// Stop signals the actor to stop and waits for it to finish.
 func (t *Trader) Stop() {
 	close(t.stopCh)
 	t.wg.Wait()
 	if t.store != nil {
-		t.store.Close()
+		if err := t.store.Close(); err != nil {
+			logger.Warnf("Trader: event store close failed: %v", err)
+		}
 	}
 }
 
-// Send sends an event to the actor. Non-blocking unless buffer is full.
 func (t *Trader) Send(evt EventEnvelope) error {
 	select {
 	case t.msgCh <- evt:
 		return nil
 	case <-t.stopCh:
 		return fmt.Errorf("trader is stopped")
-	default:
-		return fmt.Errorf("trader mailbox is full")
 	}
 }
 
-// SendSync sends an event and waits for the result (use with caution).
 func (t *Trader) SendSync(ctx context.Context, evt EventEnvelope) error {
 	if evt.ReplyCh == nil {
 		evt.ReplyCh = make(chan error, 1)
@@ -138,8 +141,6 @@ func (t *Trader) SendSync(ctx context.Context, evt EventEnvelope) error {
 	}
 }
 
-// Snapshot returns a thread-safe copy of the current state.
-// This is wait-free for readers (Manager).
 func (t *Trader) Snapshot() *State {
 	val := t.stateSnapshot.Load()
 	if val == nil {
@@ -148,15 +149,13 @@ func (t *Trader) Snapshot() *State {
 	return val.(*State)
 }
 
-// refreshSnapshot atomically updates the read-only snapshot.
-// Must be called from runLoop (writer).
 func (t *Trader) refreshSnapshot(force bool) {
 	if !force && t.snapshotThrottle > 0 && !t.lastSnapshot.IsZero() {
 		if time.Since(t.lastSnapshot) < t.snapshotThrottle {
 			return
 		}
 	}
-	// Deep copy
+
 	newState := NewState()
 	for k, v := range t.state.Positions {
 		cp := *v
@@ -191,7 +190,6 @@ func (t *Trader) refreshSnapshot(force bool) {
 	t.lastSnapshot = time.Now()
 }
 
-// runLoop is the single-threaded heart of the actor.
 func (t *Trader) runLoop() {
 
 	defer t.wg.Done()
@@ -208,38 +206,41 @@ func (t *Trader) runLoop() {
 	}
 }
 
+// handleEvent is the main entry point for processing events in the actor loop.
+//
+// Safety:
+// - Catches panics to prevent the entire actor from crashing due to a single bad handler.
+// - Enforces a timeout warning for slow handlers (>100ms) to ensure responsiveness.
+// - Persists events to the EventStore if required (shouldPersistEvent) BEFORE processing.
+// - Closes the ReplyCh (if present) to unblock synchronous callers (SendSync).
 func (t *Trader) handleEvent(evt EventEnvelope) {
 	var err error
 	Start := time.Now()
 
 	defer func() {
-		// Recovery
+
 		if r := recover(); r != nil {
 			logger.Errorf("Trader panic handling event %s: %v", evt.Type, r)
 			debug.PrintStack()
 			err = fmt.Errorf("panic: %v", r)
 		}
 
-		// Reply if requested
 		if evt.ReplyCh != nil {
 			evt.ReplyCh <- err
 			close(evt.ReplyCh)
 		}
 
-		// Log slow events
 		if dur := time.Since(Start); dur > 100*time.Millisecond {
 			logger.Warnf("Slow event %s took %v", evt.Type, dur)
 		}
 	}()
 
-	// 1. Persist Event (WAL) - skip non-fact events
 	if t.store != nil && shouldPersistEvent(evt.Type) {
 		if err := t.store.Append(evt); err != nil {
 			logger.Errorf("Failed to persist event %s: %v", evt.Type, err)
 		}
 	}
 
-	// 2. Dispatch to registered handler
 	handler, ok := t.eventRegistry.Get(evt.Type)
 	if !ok {
 		logger.Warnf("No handler registered for event type: %s", evt.Type)
@@ -260,26 +261,20 @@ func (t *Trader) hydrateFromDB(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to list active positions from DB: %w", err)
 	}
-	// Always hydrate to ensure we have the correct TradeID mappings (internal DB ID vs Exchange ID)
-	// even if we already have positions from the executor sync.
+
 	for _, rec := range active {
 		symbol := normalizeSymbol(rec.Symbol)
 		if symbol == "" {
 			continue
 		}
 
-		// Ensure we record the internal TradeID mapping
 		if rec.FreqtradeID > 0 {
 			tradeID := strconv.Itoa(rec.FreqtradeID)
 			t.state.ByTradeID[tradeID] = symbol
-			// CRITICAL: Overwrite SymbolIndex with internal ID so we can look up Plans (which are keyed by internal ID)
+
 			t.state.SymbolIndex[symbol] = tradeID
 		}
 
-		// If position is not in memory (e.g. not returned by executor sync), we might want to add it?
-		// Or trust executor? Standard practice: Trust executor for existence, DB for metadata.
-		// If executor missed it (e.g. network issue), maybe add it marked as 'assume open'?
-		// For now, let's only backfill if missing, but primarily we care about the ID mapping above.
 		if _, exists := t.state.Positions[symbol]; !exists {
 			amt := 0.0
 			if rec.Amount != nil {
@@ -317,7 +312,6 @@ func (t *Trader) hydrateFromDB(ctx context.Context) error {
 				OpenedAt:      openedAt,
 				UpdatedAt:     rec.UpdatedAt,
 				IsOpen:        true,
-				// We don't have ID from DB usually (unless we stored it), relying on FreqtradeID
 			}
 			t.state.Positions[symbol] = pos
 		}
@@ -378,14 +372,10 @@ func (t *Trader) syncExecutorPositions(ctx context.Context) error {
 	logger.Debugf("Trader: sync found %d open positions from executor", len(positions))
 	t.state.Positions = make(map[string]*exchange.Position)
 	t.state.SymbolIndex = make(map[string]string)
+	t.state.ByTradeID = make(map[string]string)
 
 	for i := range positions {
-		pos := &positions[i]
-		symbol := normalizeSymbol(pos.Symbol)
-		t.state.Positions[symbol] = pos
-		if pos.ID != "" {
-			t.state.SymbolIndex[symbol] = pos.ID
-		}
+		t.applyExecutorPosition(ctx, positions[i])
 	}
 	return nil
 }
@@ -410,14 +400,13 @@ func (t *Trader) applyExecutorPosition(ctx context.Context, pos exchange.Positio
 	}
 }
 
-// handleSyncPlans processes plan synchronization.
 func (t *Trader) handleSyncPlans(payload []byte) error {
 	var p SyncPlansPayload
 	if err := json.Unmarshal(payload, &p); err != nil {
 		return fmt.Errorf("failed to unmarshal sync plans: %w", err)
 	}
 	logger.Infof("Trader: Sync Plans for TradeID=%d", p.TradeID)
-	// Update State with Plans
+
 	strID := strconv.Itoa(p.TradeID)
 	if p.Version > 0 {
 		if prev, ok := t.state.PlanVersions[strID]; ok && p.Version <= prev {
@@ -485,30 +474,6 @@ func (t *Trader) handlePlanStateUpdate(payload []byte) error {
 	return nil
 }
 
-func planSnapshotsToRecords(tradeID int, snaps []exit.StrategyPlanSnapshot) []database.StrategyInstanceRecord {
-	recs := make([]database.StrategyInstanceRecord, 0, len(snaps))
-	for _, snap := range snaps {
-		rec := database.StrategyInstanceRecord{
-			TradeID:         tradeID,
-			PlanID:          snap.PlanID,
-			PlanComponent:   snap.PlanComponent,
-			PlanVersion:     snap.PlanVersion,
-			ParamsJSON:      snap.ParamsJSON,
-			StateJSON:       snap.StateJSON,
-			Status:          database.StrategyStatus(snap.StatusCode),
-			DecisionTraceID: snap.DecisionTraceID,
-		}
-		if snap.CreatedAt > 0 {
-			rec.CreatedAt = time.Unix(snap.CreatedAt, 0)
-		}
-		if snap.UpdatedAt > 0 {
-			rec.UpdatedAt = time.Unix(snap.UpdatedAt, 0)
-		}
-		recs = append(recs, rec)
-	}
-	return recs
-}
-
 func executorPositionToRecord(pos exchange.Position) database.LiveOrderRecord {
 	now := time.Now()
 	createdAt := pos.OpenedAt
@@ -557,7 +522,6 @@ func executorPositionToRecord(pos exchange.Position) database.LiveOrderRecord {
 	return rec
 }
 
-// handleOrderResult processes async execution results.
 func (t *Trader) handleOrderResult(payload []byte) error {
 	var res OrderResultPayload
 	if err := json.Unmarshal(payload, &res); err != nil {
@@ -566,7 +530,7 @@ func (t *Trader) handleOrderResult(payload []byte) error {
 
 	if res.Error != "" {
 		logger.Errorf("Async Execution Failed for %s: %s", res.Symbol, res.Error)
-		// TODO: Retry logic or alert?
+
 		return nil
 	}
 
@@ -612,16 +576,14 @@ func shouldPersistEvent(t EventType) bool {
 	}
 }
 
-// handlePriceUpdate processes market price updates.
 func (t *Trader) handlePriceUpdate(payload []byte) error {
 	var p PriceUpdatePayload
 	if err := json.Unmarshal(payload, &p); err != nil {
 		return fmt.Errorf("handlePriceUpdate: failed to unmarshal: %v", err)
 	}
 
-	// 1. Check if we have an active position for this symbol
 	if _, ok := t.state.Positions[p.Symbol]; !ok {
-		return nil // No active position, ignore
+		return nil
 	}
 
 	tradeIDStr := t.state.TradeIDBySymbol(p.Symbol)
@@ -629,47 +591,36 @@ func (t *Trader) handlePriceUpdate(payload []byte) error {
 		return nil
 	}
 
-	// 3. Get Plans
 	plans, ok := t.state.Plans[tradeIDStr]
 	if !ok || len(plans) == 0 {
 		return nil
 	}
 
-	// tradeIDInt, _ := strconv.Atoi(tradeIDStr) // Unused now
-
-	// 4. Evaluate Plans - DISABLED to prevent dual execution
-	// The PlanScheduler (Agent) is now the sole authority for evaluating plans.
-	// The Trader actor retains the plan state for visibility but does not act on it.
-	/*
-		for _, snap := range plans {
-			// ... internal evaluation logic removed ...
-		}
-	*/
-
-	// We keep the function signature and checks for consistency, but return early.
 	return nil
 }
 
-// handlePlanEvent processes plan triggers (StopLoss, TakeProfit, etc).
+// handlePlanEvent processes events emitted by Exit Strategies (e.g., Stop Loss Hit, Tier Filled).
+//
+// Logic:
+// 1. Identifies the Trade and Position associated with the event.
+// 2. Determines the appropriate side to close (Long Pos -> Sell, Short Pos -> Buy).
+// 3. Calculates the close amount based on event ratio (e.g., 50% partial close).
+// 4. Dispatches an async close order to the Executor.
+//
+// This allows strategies to control position sizing without knowing exchange details.
 func (t *Trader) handlePlanEvent(payload []byte) error {
 	var p PlanEventPayload
 	if err := json.Unmarshal(payload, &p); err != nil {
 		return fmt.Errorf("failed to unmarshal plan event: %w", err)
 	}
 
-	// Assuming plan event implies we need to close the position or adjust it.
-	// For "stop_loss", "take_profit", "final_stop_loss", "final_take_profit" -> Close Position.
-	// For "adjust" -> maybe ignore or AdjustOrder (not implemented fully).
-
 	symbol := ""
 
-	// 1. Try Lookup by TradeID from Index
 	strID := strconv.Itoa(p.TradeID)
 	if s, ok := t.state.ByTradeID[strID]; ok {
 		symbol = s
 	}
 
-	// 2. Fallback to Context if Index missed (e.g. legacy or un-indexed)
 	if symbol == "" {
 		if val, ok := p.Context["symbol"].(string); ok && val != "" {
 			symbol = val
@@ -682,31 +633,19 @@ func (t *Trader) handlePlanEvent(payload []byte) error {
 
 	logger.Infof("Trader: Plan Event %s type=%s", symbol, p.EventType)
 
-	// Execute Close
-	// Use ClosePosition which usually closes the entire position.
-	// We assume Side is opposite of current position, or Executor handles "Close" without side if smart.
-	// If Executor needs Side, we must look it up.
-	// Let's attempt blind close or look up state.
-
-	// Look up state for Side
 	pos, ok := t.state.Positions[symbol]
 	side := ""
 	if ok {
-		// Reverse side? Or just pass "close" intent.
-		// Executor ClosePosition usually takes side of the position to close?
-		// Or "sell" if long, "buy" if short.
+
 		if pos.Side == "long" || pos.Side == "buy" {
 			side = "sell"
 		} else {
 			side = "buy"
 		}
 	} else {
-		// If state is empty (restart), we might fail.
-		// We should try to use Executor.GetPosition to confirm.
-		// For now, log and return.
+
 		logger.Warnf("Trader: Plan Event for %s but no local state.", symbol)
-		// Try minimal effort close if API allows
-		// return t.executor.ClosePosition(...) with empty side?
+
 	}
 
 	if side == "" {
@@ -723,7 +662,6 @@ func (t *Trader) handlePlanEvent(payload []byte) error {
 	return nil
 }
 
-// handleSignalExit processes an exit signal asynchronously.
 func (t *Trader) handleSignalExit(payload []byte, traceID string) error {
 	var p SignalExitPayload
 	if err := json.Unmarshal(payload, &p); err != nil {
@@ -754,6 +692,13 @@ func (t *Trader) calcCloseAmount(pos *exchange.Position, ratio float64, isInitia
 	return trading.CalcCloseAmount(pos.Amount, pos.InitialAmount, ratio, isInitial)
 }
 
+// dispatchClose Execute a close order asynchronously.
+//
+// Mechanism:
+//   - Spawns a goroutine to avoid blocking the main actor loop (network calls can be slow).
+//   - Uses a context with timeout (30s) to safely cancel if the exchange hangs.
+//   - Sends an EvtOrderResult event back to the actor loop upon completion (success or failure).
+//     This ensures all state updates happen strictly within the actor loop, maintaining consistency.
 func (t *Trader) dispatchClose(symbol, side string, amount float64, traceID, reason, tradeID string, original interface{}) {
 	if symbol == "" || side == "" {
 		logger.Warnf("dispatchClose skipped: missing symbol/side (symbol=%s side=%s)", symbol, side)
@@ -796,14 +741,16 @@ func (t *Trader) dispatchClose(symbol, side string, amount float64, traceID, rea
 		if id, err := strconv.Atoi(strings.TrimSpace(tradeID)); err == nil {
 			tradeIDInt = id
 		}
-		t.Send(EventEnvelope{
+		if err := t.Send(EventEnvelope{
 			ID:        newEventID("order-result"),
 			Type:      EvtOrderResult,
 			Payload:   payloadBytes,
 			CreatedAt: time.Now(),
 			TradeID:   tradeIDInt,
 			Symbol:    strings.ToUpper(strings.TrimSpace(symbol)),
-		})
+		}); err != nil {
+			logger.Warnf("Trader: send order-result failed: %v", err)
+		}
 	}()
 }
 

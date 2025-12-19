@@ -1,6 +1,5 @@
 package livehttp
 
-// SymbolDetail 用于向前端暴露的币种配置概要。
 type SymbolDetail struct {
 	Profile      string   `json:"profile"`
 	Middlewares  []string `json:"middlewares,omitempty"`

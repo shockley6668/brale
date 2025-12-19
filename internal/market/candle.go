@@ -1,6 +1,5 @@
 package market
 
-// Candle 是回测写库/读取的统一结构。
 type Candle struct {
 	OpenTime  int64   `json:"open_time"`
 	CloseTime int64   `json:"close_time"`

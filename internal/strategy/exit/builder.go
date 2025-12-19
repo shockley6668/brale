@@ -10,7 +10,6 @@ import (
 	"brale/internal/gateway/database"
 )
 
-// BuildArgs 描述构建 strategy_instances 记录所需的全部信息。
 type BuildArgs struct {
 	TradeID       int
 	TraceID       string
@@ -53,7 +52,6 @@ type TierPlanState struct {
 	Mode                     string  `json:"mode,omitempty"`
 }
 
-// TierComponentState 描述单个 tier 的触发状态。
 type TierComponentState struct {
 	Name           string  `json:"name"`
 	TargetPrice    float64 `json:"target_price"`
@@ -72,7 +70,6 @@ type TierComponentState struct {
 	Mode           string  `json:"mode,omitempty"`
 }
 
-// BuildStrategyInstanceRecords 根据 ExitPlanSpec 生成 StrategyInstanceRecord 列表。
 func BuildStrategyInstanceRecords(args BuildArgs) []database.StrategyInstanceRecord {
 	if args.PlanSpec == nil || strings.TrimSpace(args.PlanSpec.ID) == "" {
 		return nil
@@ -113,8 +110,6 @@ func BuildStrategyInstanceRecords(args BuildArgs) []database.StrategyInstanceRec
 	return records
 }
 
-// buildTierPlanRecords removed
-
 func normalizeVersion(v int) int {
 	if v <= 0 {
 		return 1
@@ -130,7 +125,6 @@ func encodeState(v interface{}) string {
 	return string(buf)
 }
 
-// DecodeTierComponentState 解析 tier 组件的 state JSON。
 func DecodeTierComponentState(raw string) (TierComponentState, error) {
 	state := TierComponentState{}
 	if strings.TrimSpace(raw) == "" {
@@ -140,7 +134,6 @@ func DecodeTierComponentState(raw string) (TierComponentState, error) {
 	return state, err
 }
 
-// DecodeTierPlanState 解析 tier plan 的根状态。
 func DecodeTierPlanState(raw string) (TierPlanState, error) {
 	state := TierPlanState{}
 	if strings.TrimSpace(raw) == "" {
@@ -150,12 +143,10 @@ func DecodeTierPlanState(raw string) (TierPlanState, error) {
 	return state, err
 }
 
-// EncodeTierComponentState 将 tier 组件状态编码为 JSON。
 func EncodeTierComponentState(state TierComponentState) string {
 	return encodeState(state)
 }
 
-// EncodeTierPlanState 将根状态编码为 JSON。
 func EncodeTierPlanState(state TierPlanState) string {
 	return encodeState(state)
 }

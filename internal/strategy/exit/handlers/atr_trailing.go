@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"brale/internal/strategy/exit"
 )
@@ -14,7 +13,6 @@ const (
 	minATRTrailMultiplier   = 0.5
 )
 
-// atrTrailingHandler 将 ATR 值转换为 trigger_pct/trail_pct，再复用 trailing_stop handler。
 type atrTrailingHandler struct {
 	base trailingStopHandler
 }
@@ -22,19 +20,23 @@ type atrTrailingHandler struct {
 func (h *atrTrailingHandler) ID() string { return "atr_trailing" }
 
 func (h *atrTrailingHandler) Validate(params map[string]any) error {
-	if params == nil {
-		return fmt.Errorf("缺少参数")
+	if err := validateModeParam(params); err != nil {
+		return err
 	}
-	if raw, ok := params["mode"]; ok {
-		mode, ok := raw.(string)
-		if !ok {
-			return fmt.Errorf("mode 必须为字符串")
-		}
-		mode = strings.ToLower(strings.TrimSpace(mode))
-		if mode != "" && mode != "take_profit" && mode != "stop_loss" {
-			return fmt.Errorf("mode 只能是 take_profit 或 stop_loss")
-		}
+	if err := validateATRTrailingParams(params); err != nil {
+		return err
 	}
+	initialStopMult, hasStop := number(params["initial_stop_multiplier"])
+	if hasStop && initialStopMult < 0 {
+		return fmt.Errorf("initial_stop_multiplier 不可为负")
+	}
+	if hasStop && initialStopMult > 0 && initialStopMult < 1 {
+		return fmt.Errorf("initial_stop_multiplier 需 >= 1 或省略（等价于无起始止损）")
+	}
+	return nil
+}
+
+func validateATRTrailingParams(params map[string]any) error {
 	atr, ok := number(params["atr_value"])
 	if !ok || atr <= 0 {
 		return fmt.Errorf("atr_value 需 >0")
@@ -55,13 +57,6 @@ func (h *atrTrailingHandler) Validate(params map[string]any) error {
 	}
 	if trailMult >= triggerMult {
 		return fmt.Errorf("trail_multiplier 需小于 trigger_multiplier")
-	}
-	initialStopMult, hasStop := number(params["initial_stop_multiplier"])
-	if hasStop && initialStopMult < 0 {
-		return fmt.Errorf("initial_stop_multiplier 不可为负")
-	}
-	if hasStop && initialStopMult > 0 && initialStopMult < 1 {
-		return fmt.Errorf("initial_stop_multiplier 需 >= 1 或省略（等价于无起始止损）")
 	}
 	return nil
 }

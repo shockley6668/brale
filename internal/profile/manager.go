@@ -10,12 +10,10 @@ import (
 	"brale/internal/pipeline"
 )
 
-// MiddlewareFactory 根据配置生成中间件。
 type MiddlewareFactory interface {
 	Build(cfg loader.MiddlewareConfig, profile loader.ProfileDefinition) (pipeline.Middleware, error)
 }
 
-// Runtime 表示编译后的 profile。
 type Runtime struct {
 	Definition           loader.ProfileDefinition
 	Pipeline             *pipeline.Pipeline
@@ -29,7 +27,6 @@ type Runtime struct {
 	AgentEnabled         bool
 }
 
-// Manager 维护 symbol -> profile 的映射，并响应热更新。
 type Manager struct {
 	factory      MiddlewareFactory
 	promptLoader PromptLoader
@@ -40,7 +37,6 @@ type Manager struct {
 	defaultProf *Runtime
 }
 
-// NewManager 构建 manager，并订阅 loader 更新。
 func NewManager(ld *loader.ProfileLoader, factory MiddlewareFactory, promptLoader PromptLoader) *Manager {
 	mgr := &Manager{factory: factory, promptLoader: promptLoader}
 	if ld != nil {
@@ -51,7 +47,6 @@ func NewManager(ld *loader.ProfileLoader, factory MiddlewareFactory, promptLoade
 	return mgr
 }
 
-// Resolve 找到某个 symbol 对应的 profile。
 func (m *Manager) Resolve(symbol string) (*Runtime, bool) {
 	if m == nil {
 		return nil, false
@@ -68,7 +63,6 @@ func (m *Manager) Resolve(symbol string) (*Runtime, bool) {
 	return nil, false
 }
 
-// Profiles 返回全部 profile。
 func (m *Manager) Profiles() []*Runtime {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

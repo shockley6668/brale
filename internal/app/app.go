@@ -14,16 +14,14 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// App 负责应用级编排：加载配置→初始化依赖→启动实时与回测服务。
 type App struct {
 	cfg        *brcfg.Config
 	live       *agent.LiveService
 	liveHTTP   *livehttp.Server
-	metricsSvc *market.MetricsService // 新增：持有 MetricsService 实例
-	Summary    *StartupSummary        // 新增：启动摘要
+	metricsSvc *market.MetricsService
+	Summary    *StartupSummary
 }
 
-// NewApp 根据配置构建应用对象（不启动）
 func NewApp(cfg *brcfg.Config) (*App, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("nil config")
@@ -32,7 +30,6 @@ func NewApp(cfg *brcfg.Config) (*App, error) {
 	return buildAppWithWire(context.Background(), cfg)
 }
 
-// Run 启动回测与实时服务。
 func (a *App) Run(ctx context.Context) error {
 	if a == nil || a.cfg == nil {
 		return fmt.Errorf("app not initialized")
@@ -64,7 +61,6 @@ func (a *App) Run(ctx context.Context) error {
 	return group.Wait()
 }
 
-// LiveService exposes the underlying live service instance (for testing/replay harnesses).
 func (a *App) LiveService() *agent.LiveService {
 	if a == nil {
 		return nil

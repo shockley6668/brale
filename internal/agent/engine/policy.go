@@ -13,12 +13,11 @@ import (
 	"brale/internal/strategy/exit"
 )
 
-// ExitPlanPolicy handles validation and injection of exit plans into decisions.
 type ExitPlanPolicy struct {
 	exitPlans    *exitplan.Registry
 	planHandlers *exit.HandlerRegistry
 	profileMgr   *profile.Manager
-	mktService   interfaces.MarketService // needed for ATR injection
+	mktService   interfaces.MarketService
 }
 
 func NewExitPlanPolicy(plans *exitplan.Registry, handlers *exit.HandlerRegistry, profiles *profile.Manager, mkt interfaces.MarketService) *ExitPlanPolicy {
@@ -30,8 +29,6 @@ func NewExitPlanPolicy(plans *exitplan.Registry, handlers *exit.HandlerRegistry,
 	}
 }
 
-// ApplyPolicies filters and enriches decisions with exit plan details.
-// Corresponds to legacy `applyExitPlanPolicies`.
 func (p *ExitPlanPolicy) Apply(decisions []decision.Decision) []decision.Decision {
 	if len(decisions) == 0 {
 		return nil
@@ -144,7 +141,6 @@ func (p *ExitPlanPolicy) ensureATRValue(symbol, label, handler string, params ma
 		return
 	}
 
-	// Use MarketService to get ATR
 	atr, ok := p.mktService.GetATR(symbol)
 
 	if !ok || atr <= 0 {

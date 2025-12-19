@@ -9,7 +9,6 @@ import (
 	"brale/internal/market"
 )
 
-// AgentInsight 记录多阶段 Agent 的文本输出。
 type AgentInsight struct {
 	Stage      string `json:"stage"`
 	ProviderID string `json:"provider_id"`

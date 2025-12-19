@@ -6,22 +6,21 @@ import (
 	"strings"
 )
 
-// StartupSummary 包含启动时的关键配置信息
 type StartupSummary struct {
 	KLine         KLineSummary
 	EMA           EMASummary
-	Prompts       map[string]string       // Prompt 名称 -> 内容摘要
-	SymbolDetails map[string]SymbolDetail // 币种 -> 详情
+	Prompts       map[string]string
+	SymbolDetails map[string]SymbolDetail
 }
 
 type SymbolDetail struct {
 	ProfileName  string
-	Middlewares  []string // 格式化的中间件信息 "Name (params)"
-	Strategies   []string // 格式化的策略信息 "ID: Description"
-	ExitSummary  string   // 出场策略的中文概述
-	ExitCombos   []string // 出场策略组合 key，便于前端展示
-	SystemPrompt string   // System prompt name
-	UserPrompt   string   // User prompt name
+	Middlewares  []string
+	Strategies   []string
+	ExitSummary  string
+	ExitCombos   []string
+	SystemPrompt string
+	UserPrompt   string
 }
 
 type KLineSummary struct {
@@ -41,26 +40,23 @@ func (s *StartupSummary) Print() {
 	fmt.Printf("%*s\n", 40+len("启动配置摘要 (STARTUP SUMMARY)")/2, "启动配置摘要 (STARTUP SUMMARY)")
 	fmt.Println(strings.Repeat("=", 80))
 
-	// K-Line
 	fmt.Println("[K线数据 (K-LINE DATA)]")
 	fmt.Printf("  监控币种: %s\n", formatList(s.KLine.Symbols))
 	fmt.Printf("  订阅周期: %s\n", formatList(s.KLine.Intervals))
 	fmt.Printf("  最大缓存: %d\n", s.KLine.MaxCached)
 	fmt.Println()
 
-	// EMA / Metrics
 	fmt.Println("[EMA / 衍生品配置 (EMA / METRICS)]")
 	fmt.Printf("  目标周期: %s\n", formatList(s.EMA.TargetTimeframes))
 	fmt.Printf("  基准周期: %s\n", s.EMA.BasePeriod)
 	fmt.Printf("  历史长度: %d\n", s.EMA.HistoryLimit)
 	fmt.Println()
 
-	// Symbol Details
 	fmt.Println("[币种配置详情 (SYMBOLS CONFIGURATION)]")
 	if len(s.SymbolDetails) == 0 {
 		fmt.Println("  (无配置)")
 	} else {
-		// Sort symbols for consistent output
+
 		symbols := make([]string, 0, len(s.SymbolDetails))
 		for sym := range s.SymbolDetails {
 			symbols = append(symbols, sym)
@@ -95,7 +91,6 @@ func (s *StartupSummary) Print() {
 		}
 	}
 
-	// Prompts
 	fmt.Println("[提示词与约束 (PROMPTS & CONSTRAINTS)]")
 	if len(s.SymbolDetails) == 0 {
 		fmt.Println("  (无)")
@@ -121,7 +116,7 @@ func (s *StartupSummary) Print() {
 				if len(lines) > 5 {
 					preview = strings.Join(lines[:5], "\n") + "\n    ... (truncated)"
 				}
-				// Indent the preview
+
 				preview = strings.ReplaceAll(preview, "\n", "\n    ")
 				fmt.Printf("    [%s Prompt] %s:\n    %s\n", role, name, preview)
 			}

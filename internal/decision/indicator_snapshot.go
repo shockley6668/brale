@@ -92,7 +92,6 @@ type atrSnapshot struct {
 	RangeHi float64   `json:"range_max"`
 }
 
-// BuildIndicatorSnapshot 构建用于 LLM 的精简指标快照。
 func BuildIndicatorSnapshot(candles []market.Candle, rep indicator.Report) ([]byte, error) {
 	if len(candles) == 0 {
 		return nil, fmt.Errorf("indicator snapshot: no candles")

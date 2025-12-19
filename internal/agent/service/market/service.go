@@ -15,19 +15,13 @@ import (
 	"brale/internal/store"
 )
 
-// Service implements interfaces.MarketService.
 type Service struct {
 	cfg        *config.Config
 	ks         market.KlineStore
 	profileMgr *profile.Manager
 
-	// Optional monitor to get realtime prices if not using kline store for that
-	// In legacy, PriceMonitor was used. We can assume we have access to it or similar capability.
-	// For now, let's inject a "PriceSource" interface or just reuse market.KlineStore if it supports it.
-	// Legacy Monitor used `Updater` or `KlineStore` to get latest price.
 	monitor PriceSource
 
-	// Cache
 	indicatorMu   sync.RWMutex
 	indicatorSnap map[string]indicatorSnapshot
 
@@ -63,7 +57,6 @@ func NewService(p ServiceParams) *Service {
 	}
 }
 
-// Ensure implementation
 var _ interfaces.MarketService = (*Service)(nil)
 
 type indicatorSnapshot struct {
@@ -74,7 +67,7 @@ type indicatorSnapshot struct {
 func (s *Service) GetAnalysisContexts(ctx context.Context, symbols []string) ([]decision.AnalysisContext, error) {
 	exporter, ok := s.ks.(store.SnapshotExporter)
 	if !ok || s.profileMgr == nil {
-		return nil, nil // Or error? Legacy returned nil
+		return nil, nil
 	}
 
 	out := make([]decision.AnalysisContext, 0, len(symbols))
@@ -93,7 +86,7 @@ func (s *Service) GetAnalysisContexts(ctx context.Context, symbols []string) ([]
 			intervals = s.hIntervals
 		}
 		if len(intervals) == 0 {
-			intervals = []string{"1h"} // Fallback
+			intervals = []string{"1h"}
 		}
 
 		input := decision.AnalysisBuildInput{

@@ -2,13 +2,13 @@ package freqtrade
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"brale/internal/gateway/database"
 	"brale/internal/store"
 )
 
-// PositionRepo 封装对 live_orders / live_tiers 的查询与更新。
 type PositionRepo struct {
 	store    store.Store
 	posStore database.LivePositionStore
@@ -18,7 +18,6 @@ type strategyInstanceBatchLister interface {
 	ListStrategyInstancesByTradeIDs(ctx context.Context, tradeIDs []int) (map[int][]database.StrategyInstanceRecord, error)
 }
 
-// NewPositionRepo 创建 repo。
 func NewPositionRepo(kv store.Store, ps database.LivePositionStore) *PositionRepo {
 	return &PositionRepo{
 		store:    kv,
@@ -26,12 +25,11 @@ func NewPositionRepo(kv store.Store, ps database.LivePositionStore) *PositionRep
 	}
 }
 
-// ListActivePositions 查询当前未平仓或部分平仓的订单。
 func (r *PositionRepo) ListActivePositions(ctx context.Context, limit int) ([]database.LiveOrderRecord, error) {
 	if r.store != nil {
 		uow, err := r.store.Begin(ctx)
 		if err == nil {
-			defer uow.Rollback()
+			defer func() { _ = uow.Rollback() }()
 			orders, err := uow.Orders().ListActive(ctx)
 			if err == nil && len(orders) > 0 {
 				var res []database.LiveOrderRecord
@@ -49,14 +47,12 @@ func (r *PositionRepo) ListActivePositions(ctx context.Context, limit int) ([]da
 	return r.posStore.ListActivePositions(ctx, limit)
 }
 
-// ListRecentPositionsPaged 查询最近仓位（包含已平仓），按时间倒序分页。
 func (r *PositionRepo) ListRecentPositionsPaged(ctx context.Context, symbol string, limit int, offset int) ([]database.LiveOrderRecord, error) {
 	symbol = strings.ToUpper(strings.TrimSpace(symbol))
 	if r.posStore != nil {
 		return r.posStore.ListRecentPositionsPaged(ctx, symbol, limit, offset)
 	}
 
-	// Fallback: store.OrderRepository 仅支持按 limit 查询，不支持分页/过滤。
 	if r.store == nil {
 		return nil, nil
 	}
@@ -68,7 +64,7 @@ func (r *PositionRepo) ListRecentPositionsPaged(ctx context.Context, symbol stri
 	if err != nil {
 		return nil, err
 	}
-	defer uow.Rollback()
+	defer func() { _ = uow.Rollback() }()
 	orders, err := uow.Orders().ListRecent(ctx, fetch)
 	if err != nil {
 		return nil, err
@@ -94,12 +90,11 @@ func (r *PositionRepo) ListRecentPositionsPaged(ctx context.Context, symbol stri
 	return out[offset:end], nil
 }
 
-// GetPosition 查询特定 tradeID 的仓位。
 func (r *PositionRepo) GetPosition(ctx context.Context, tradeID int) (database.LiveOrderRecord, bool, error) {
 	if r.store != nil {
 		uow, err := r.store.Begin(ctx)
 		if err == nil {
-			defer uow.Rollback()
+			defer func() { _ = uow.Rollback() }()
 			order, err := uow.Orders().FindByID(ctx, tradeID)
 			if err == nil && order != nil {
 				return fromOrderModel(order), true, nil
@@ -113,30 +108,38 @@ func (r *PositionRepo) GetPosition(ctx context.Context, tradeID int) (database.L
 	return r.posStore.GetLivePosition(ctx, tradeID)
 }
 
-// SavePosition 保存仓位
 func (r *PositionRepo) SavePosition(ctx context.Context, rec database.LiveOrderRecord) error {
+	var storeErr error
 	if r.store != nil {
 		uow, err := r.store.Begin(ctx)
 		if err == nil {
+			defer func() { _ = uow.Rollback() }()
 			model := toOrderModel(rec)
 			if err := uow.Orders().Save(ctx, model); err == nil {
-				uow.Commit()
+				if err := uow.Commit(); err != nil {
+					storeErr = err
+				}
 			}
 		}
 	}
 
 	if r.posStore == nil {
-		return nil
+		return storeErr
 	}
-	return r.posStore.UpsertLiveOrder(ctx, rec)
+	if err := r.posStore.UpsertLiveOrder(ctx, rec); err != nil {
+		if storeErr != nil {
+			return fmt.Errorf("persist order commit=%v upsert=%w", storeErr, err)
+		}
+		return err
+	}
+	return storeErr
 }
 
-// ListStrategyInstances list strategies
 func (r *PositionRepo) ListStrategyInstances(ctx context.Context, tradeID int) ([]database.StrategyInstanceRecord, error) {
 	if r.store != nil {
 		uow, err := r.store.Begin(ctx)
 		if err == nil {
-			defer uow.Rollback()
+			defer func() { _ = uow.Rollback() }()
 			recs, err := uow.Strategies().FindByTradeID(ctx, tradeID)
 			if err == nil && len(recs) > 0 {
 				var out []database.StrategyInstanceRecord
@@ -154,8 +157,6 @@ func (r *PositionRepo) ListStrategyInstances(ctx context.Context, tradeID int) (
 	return r.posStore.ListStrategyInstances(ctx, tradeID)
 }
 
-// ListStrategyInstancesByTradeIDs batches strategy instance lookup when the underlying store supports it.
-// Falls back to individual queries otherwise.
 func (r *PositionRepo) ListStrategyInstancesByTradeIDs(ctx context.Context, tradeIDs []int) (map[int][]database.StrategyInstanceRecord, error) {
 	out := make(map[int][]database.StrategyInstanceRecord, len(tradeIDs))
 	ids := make([]int, 0, len(tradeIDs))
@@ -192,7 +193,6 @@ func (r *PositionRepo) ListStrategyInstancesByTradeIDs(ctx context.Context, trad
 	return out, nil
 }
 
-// TradeEvents wraps ListTradeOperations
 func (r *PositionRepo) TradeEvents(ctx context.Context, tradeID int, limit int) ([]database.TradeOperationRecord, error) {
 	if r.store != nil {
 		uow, err := r.store.Begin(ctx)

@@ -14,13 +14,11 @@ import (
 	promptkit "brale/internal/prompt"
 )
 
-// StandardStrategy implements the default prompting logic.
 type StandardStrategy struct {
 	exitPlans       *exitplan.Registry
 	exitPlanPrompts map[string]promptkit.ExitPlanPrompt
 }
 
-// NewStandardStrategy creates a new StandardStrategy.
 func NewStandardStrategy(plans *exitplan.Registry, prompts map[string]promptkit.ExitPlanPrompt) *StandardStrategy {
 	return &StandardStrategy{
 		exitPlans:       plans,
@@ -37,13 +35,11 @@ func (s *StandardStrategy) Build(
 	if ctx == nil {
 		return nil
 	}
-	// 1. Build Prompt Bundle
+
 	ctx.Prompt = s.buildProfilePromptBundle(activeProfiles, featureLines)
 
-	// 2. Build Global Exit Plan Directive
 	ctx.ExitPlanDirective = s.renderExitPlanDirective(allProfiles)
 
-	// 3. Build Per-Profile Directives
 	ctx.ProfilePrompts = s.buildProfilePrompts(ctx.Candidates, activeProfiles)
 	return nil
 }
@@ -110,7 +106,7 @@ func (s *StandardStrategy) resolveProfileExitDirective(rt *profile.Runtime) stri
 	if text != "" {
 		builder.WriteString(text)
 	}
-	// example intentionally ignored here for prompt body, usually appended or handled separately
+
 	return strings.TrimSpace(builder.String())
 }
 
@@ -151,7 +147,7 @@ func (s *StandardStrategy) buildProfilePrompts(candidates []string, activeProfil
 		promptRef := strings.TrimSpace(rt.Definition.Prompts.User)
 		sysPrompts := decision.CloneStringMap(rt.SystemPromptsByModel)
 		exitText, example := s.buildProfileExitDirective(rt, sym)
-		// 只有当所有字段均为空时才跳过
+
 		if len(sysPrompts) == 0 && strings.TrimSpace(promptText) == "" && strings.TrimSpace(exitText) == "" && strings.TrimSpace(example) == "" {
 			continue
 		}
@@ -235,8 +231,6 @@ func (s *StandardStrategy) lookupComboPrompts(keys []string) []promptkit.ExitPla
 	}
 	return result
 }
-
-// Helpers
 
 func rtNameForSymbol(sym string, active map[string]*profile.Runtime) string {
 	for name, rt := range active {

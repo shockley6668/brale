@@ -1,44 +1,53 @@
+# brale 示例配置（复制为 configs/config.yaml 后修改）
+# 说明：
+# - 本文件主要是全局/运行时配置（端口、数据源、模型/通知/freqtrade 等）
+# - 交易品种、周期、指标中间件、prompt、exit_plan 组合等在 configs/profiles.yaml 中配置
+
 app:
-  log_level: "info"               # 日志级别
-  http_addr: ":9991"              # HTTP 服务监听地址
-  llm_log_path: "/data/logs/brale-llm.log"
-  llm_dump_payload: false
+  log_level: "info"               # 日志级别：debug/info/warn/error
+  http_addr: ":9991"              # HTTP 服务监听地址（例如 :9991 或 0.0.0.0:9991）
+  llm_log_path: "/data/logs/brale-llm.log" # LLM 调用日志输出路径（建议挂载到持久化目录）
+  llm_dump_payload: false         # 是否落盘保存完整请求/响应 payload（可能包含敏感信息）
 
 market:
-  active_source: "binance"
-  enabled: true
+  active_source: "binance"        # 行情源名称：需与 sources[].name 对应
+  enabled: true                   # 是否启用行情/指标管线（关闭则不会拉取 K 线/指标）
   sources:
     - name: "binance"
       enabled: true
-      rest_base_url: "https://fapi.binance.com"
+      rest_base_url: "https://fapi.binance.com" # Binance 合约 REST 地址（USDT-M Futures）
       proxy:
-        enabled: false
-        rest_url: ""
-        ws_url: ""
+        enabled: false            # 是否启用代理
+        rest_url: ""              # 代理后的 REST 地址（留空表示不走代理）
+        ws_url: ""                # 代理后的 WS 地址（留空表示不走代理）
 
 ai:
+  # weights：用于 meta 聚合/投票时的模型权重（不聚合时可以忽略）
   weights:
     openai: 1.0
     deepseek: 1.0
     qwen: 1.0
     vanchin: 1.0
   active_horizon: "profiles"      # 仅作标签；真实配置在 profiles.yaml
-  provider_preference: ["deepseek", "qwen"]
+  provider_preference: ["deepseek", "qwen"] # 默认模型选择顺序（第一个启用且可用的会被选中）
   multi_agent:
-    enabled: true
-    indicator_provider: "deepseek"
-    pattern_provider: "qwen"
-    trend_provider: "vanchin"
-    indicator_template: "agent_indicator"
+    enabled: true                 # 是否启用 Multi-Agent（指标/形态/趋势分工）
+    indicator_provider: "deepseek" # 指标 Agent 使用的模型 id
+    pattern_provider: "qwen"       # 形态 Agent 使用的模型 id
+    trend_provider: "vanchin"      # 趋势 Agent 使用的模型 id
+    indicator_template: "agent_indicator" # prompts/ 下的模板名（不含 .txt）
     pattern_template: "agent_pattern"
     trend_template: "agent_trend"
   models:
+    # models：模型列表；id 需要全局唯一，并在 provider_preference / multi_agent.*_provider 中引用
+    # supports_vision：是否支持图片输入（如接入带视觉的模型）
+    # expect_json：是否强制要求模型输出 JSON（用于某些严格解析场景）
     - id: "deepseek"
-      provider: "deepseek"
-      enabled: false
-      api_url: ""
-      api_key: ""
-      model: "deepseek/deepseek-v3.2-exp-thinking"
+      provider: "deepseek"        # 提供方类型（影响 client 实现）
+      enabled: false              # 是否启用该模型
+      api_url: ""                 # API base url（留空表示使用内置默认/提供方默认）
+      api_key: ""                 # API Key（建议通过环境变量/密钥管理注入）
+      model: "deepseek/deepseek-v3.2-exp-thinking" # 模型名称/标识
       supports_vision: false
       expect_json: false
     - id: "qwen"
@@ -60,19 +69,19 @@ ai:
 
 notify:
   telegram:
-    enabled: true
-    bot_token: ""
-    chat_id: ""
+    enabled: true                 # 是否启用 Telegram 推送
+    bot_token: ""                 # Telegram Bot Token
+    chat_id: ""                   # 目标 chat id（个人/群组）
 
 freqtrade:
-  username: ""
-  password: ""
-  api_url: "http://freqtrade:8080/api/v1"
-  min_stop_distance_pct: 0.005
-  entry_slip_pct: 0.0002
+  username: ""                    # freqtrade API 用户名（如开启鉴权）
+  password: ""                    # freqtrade API 密码
+  api_url: "http://freqtrade:8080/api/v1" # freqtrade API 地址（docker-compose 默认是 http://freqtrade:8080/api/v1）
+  min_stop_distance_pct: 0.005    # 最小止损距离（避免 stoploss 过近被拒单）
+  entry_slip_pct: 0.0002          # 开仓价格滑点（用于风控校验/下单预估）
 
 advanced:
-  min_risk_reward: 2
+  min_risk_reward: 2              # 最小风险回报 RR（低于该值的开仓会被过滤）
 
 mcp:
-  timeout_seconds: 500
+  timeout_seconds: 500            # MCP/工具调用的超时时间（秒）

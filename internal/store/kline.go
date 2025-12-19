@@ -8,18 +8,15 @@ import (
 	"brale/internal/market"
 )
 
-// KlineStore 抽象：读写 symbol+interval 的序列
 type KlineStore interface {
 	Put(ctx context.Context, symbol, interval string, ks []market.Candle, max int) error
 	Get(ctx context.Context, symbol, interval string) ([]market.Candle, error)
 }
 
-// SnapshotExporter 导出固定窗口 K 线的抽象。
 type SnapshotExporter interface {
 	Export(ctx context.Context, symbol, interval string, limit int) ([]market.Candle, error)
 }
 
-// MemoryKlineStore 内存实现
 type MemoryKlineStore struct {
 	shards []klineShard
 }
@@ -61,7 +58,6 @@ func (s *MemoryKlineStore) shardFor(key string) *klineShard {
 
 func key(symbol, interval string) string { return symbol + "@" + interval }
 
-// Put 追加并裁剪
 func (s *MemoryKlineStore) Put(ctx context.Context, symbol, interval string, ks []market.Candle, max int) error {
 	if symbol == "" || interval == "" {
 		return errors.New("symbol/interval 不能为空")
@@ -80,7 +76,7 @@ func (s *MemoryKlineStore) Put(ctx context.Context, symbol, interval string, ks 
 	for _, candle := range ks {
 		n := len(cur)
 		if n > 0 && cur[n-1].OpenTime == candle.OpenTime {
-			// 同一根 K 线的增量更新，覆盖末尾而非重复追加。
+
 			cur[n-1] = candle
 			continue
 		}
@@ -93,7 +89,6 @@ func (s *MemoryKlineStore) Put(ctx context.Context, symbol, interval string, ks 
 	return nil
 }
 
-// Set 全量替换指定 symbol+interval 的序列
 func (s *MemoryKlineStore) Set(ctx context.Context, symbol, interval string, ks []market.Candle) error {
 	if symbol == "" || interval == "" {
 		return errors.New("symbol/interval 不能为空")
@@ -108,7 +103,6 @@ func (s *MemoryKlineStore) Set(ctx context.Context, symbol, interval string, ks 
 	return nil
 }
 
-// Get 返回拷贝
 func (s *MemoryKlineStore) Get(ctx context.Context, symbol, interval string) ([]market.Candle, error) {
 	k := key(symbol, interval)
 	sh := s.shardFor(k)
@@ -120,7 +114,6 @@ func (s *MemoryKlineStore) Get(ctx context.Context, symbol, interval string) ([]
 	return out, nil
 }
 
-// Export 返回最近 limit 根 K 线（按时间升序）
 func (s *MemoryKlineStore) Export(ctx context.Context, symbol, interval string, limit int) ([]market.Candle, error) {
 	if symbol == "" || interval == "" {
 		return nil, errors.New("symbol/interval 不能为空")
