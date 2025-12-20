@@ -163,7 +163,7 @@ func buildAnalysisContextForSymbolInterval(cfg analysisBuildConfig, sym string, 
 		ForecastHorizon: cfg.horizonName,
 	}
 	if cfg.withImages && calculated && indErr == nil {
-		ac.ImageB64, ac.ImageNote = renderComposite(cfg.ctx, sym, iv, cfg.horizonName, shortCandles, rep, pat)
+		ac.ImageB64, ac.ImageNote = renderComposite(cfg.ctx, sym, iv, cfg.horizonName, shortCandles, fullCandles, rep, pat)
 	}
 	return ac, true
 }
@@ -280,13 +280,14 @@ func formatTrendReport(pat pattern.Result) string {
 	return trendReport
 }
 
-func renderComposite(ctx context.Context, sym, iv, horizon string, candles []market.Candle, rep indicator.Report, pat pattern.Result) (string, string) {
+func renderComposite(ctx context.Context, sym, iv, horizon string, candles []market.Candle, history []market.Candle, rep indicator.Report, pat pattern.Result) (string, string) {
 	imgInput := visual.CompositeInput{
 		Context:    ctx,
 		Symbol:     sym,
 		Horizon:    horizon,
 		Intervals:  []string{iv},
 		Candles:    map[string][]market.Candle{iv: candles},
+		History:    map[string][]market.Candle{iv: history},
 		Indicators: map[string]indicator.Report{iv: rep},
 		Patterns:   map[string]pattern.Result{iv: pat},
 	}
@@ -323,27 +324,8 @@ func trimCandlesWindow(candles []market.Candle, sliceLen, dropTail int) []market
 	return candles[start:end]
 }
 
-var intervalSliceLimits = map[string]int{
-	"15m": 32,
-	"30m": 32,
-	"1h":  48,
-	"2h":  48,
-	"4h":  36,
-	"1d":  30,
-}
-
 func enforceIntervalSliceLimit(interval string, requested int) int {
-	limit, ok := intervalSliceLimits[strings.ToLower(strings.TrimSpace(interval))]
-	if !ok {
-		if requested <= 0 {
-			return requested
-		}
-		return requested
-	}
-	if requested > 0 && requested < limit {
-		return requested
-	}
-	return limit
+	return requested
 }
 
 func clipIndicatorReport(rep indicator.Report, keep int) indicator.Report {

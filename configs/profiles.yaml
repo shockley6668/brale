@@ -1,4 +1,14 @@
 # profiles.yaml：运行配置（币种/周期/指标中间件/prompt/exit_plan 组合）
+# 图表与指标窗口说明（重要）：
+# - analysis_slice：图表/CSV 显示的最近 N 根K线窗口（越小图越稀疏）。
+# - slice_drop_tail：再丢弃最新 N 根（常用于避开未收线K线）。
+# - 实际图表窗口 = analysis_slice - slice_drop_tail（若 >0）；指标计算不受 analysis_slice 影响。
+# - EMA/MACD/RSI 由历史K线计算，历史长度上限由 kline_fetcher.limit 与 kline.max_cached 决定。
+# - EMA200 要让整张图表不留空白：历史根数 >= (图表窗口 + 199)。
+# - MACD 要让整张图表不留空白：历史根数 >= (图表窗口 + (slow + signal - 1))。
+# - 示例：analysis_slice=100, slice_drop_tail=1 -> 图表窗口=99；
+#   EMA200 需 >= 99+199=298 根历史；MACD(12/26/9) 需 >= 99+34=133 根历史。
+# - 若图表出现空白：降低 analysis_slice，或提高 kline_fetcher.limit 与 config.yaml 的 kline.max_cached。
 # 结构说明：
 # - profiles: 下每个 key 是一个 profile 名称（可自定义）
 # - 每个 profile 可绑定多个 targets（币种），并配置订阅周期、决策频率、指标中间件等
@@ -11,7 +21,7 @@ profiles:
     targets: ["ETH/USDT"]                   # 交易对列表（建议大写；支持多个）
     intervals: ["15m", "1h", "4h"]          # 订阅的 K 线周期（将汇总给模型）
     decision_interval_multiple: 2           # 决策调度：最短周期 * 倍数（UTC 对齐）；例如最短 15m，倍数 4 => 每 1h 决策一次
-    analysis_slice: 300                     # 每个周期截取最近 N 根 K 线参与分析
+    analysis_slice: 100                    # 每个周期截取最近 N 根 K 线参与图表生成
     slice_drop_tail: 1                      # 丢弃最新 N 根（避免最后一根未收线导致噪声）
     # middlewares 中如启用 ema/rsi/macd，将自动触发 Multi-Agent；若全部关闭则 Provider 阶段不会调用 Agent。
     middlewares:

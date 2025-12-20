@@ -49,6 +49,7 @@ type CompositeInput struct {
 	Horizon    string
 	Intervals  []string
 	Candles    map[string][]market.Candle
+	History    map[string][]market.Candle
 	Indicators map[string]indicator.Report
 	Patterns   map[string]pattern.Result
 }
@@ -134,6 +135,10 @@ func buildCompositeHTML(input CompositeInput) ([]byte, string, error) {
 		if len(candles) == 0 {
 			continue
 		}
+		history := input.History[interval]
+		if len(history) == 0 {
+			history = candles
+		}
 		info := buildIntervalSummary(interval, input.Patterns[interval], input.Indicators[interval])
 		descriptions = append(descriptions, fmt.Sprintf("%s: %s", interval, info.Summary))
 
@@ -197,7 +202,7 @@ func buildCompositeHTML(input CompositeInput) ([]byte, string, error) {
 		kline.Overlap(emaLine)
 
 		volume := buildVolumeChart(interval, xAxis, candles)
-		macdChart := buildMACDChart(interval, xAxis, candles)
+		macdChart := buildMACDChart(interval, xAxis, candles, history)
 
 		page.AddCharts(kline, volume, macdChart)
 	}
@@ -319,7 +324,7 @@ func buildVolumeChart(interval string, xAxis []string, candles []market.Candle) 
 	return bar
 }
 
-func buildMACDChart(interval string, xAxis []string, candles []market.Candle) *charts.Bar {
+func buildMACDChart(interval string, xAxis []string, candles []market.Candle, history []market.Candle) *charts.Bar {
 	bar := charts.NewBar()
 	bar.SetGlobalOptions(
 		charts.WithInitializationOpts(opts.Initialization{
@@ -337,7 +342,11 @@ func buildMACDChart(interval string, xAxis []string, candles []market.Candle) *c
 			SplitLine: &opts.SplitLine{Show: opts.Bool(true), LineStyle: &opts.LineStyle{Color: colorTextSecondary, Opacity: opts.Float(0.15)}},
 		}),
 	)
-	dif, dea, hist := calcMACDSeries(candles)
+	dif, dea, hist := calcMACDSeries(history)
+	windowLen := len(candles)
+	dif = tailSeries(dif, windowLen)
+	dea = tailSeries(dea, windowLen)
+	hist = tailSeries(hist, windowLen)
 	histData := make([]opts.BarData, len(candles))
 	for i, v := range hist {
 		if math.IsNaN(v) {
@@ -391,6 +400,16 @@ func toLineData(series []float64, length int) []opts.LineData {
 		}
 	}
 	return line
+}
+
+func tailSeries(series []float64, keep int) []float64 {
+	if keep <= 0 || len(series) == 0 {
+		return nil
+	}
+	if len(series) <= keep {
+		return series
+	}
+	return series[len(series)-keep:]
 }
 
 func calcMACDSeries(candles []market.Candle) (dif, dea, hist []float64) {
