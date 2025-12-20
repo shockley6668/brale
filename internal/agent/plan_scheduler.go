@@ -323,15 +323,19 @@ func (s *PlanScheduler) clearStalePending(ctx context.Context) {
 	if s == nil || s.repo == nil || s.pendingTimeout <= 0 {
 		return
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx = ensureContext(ctx)
 	ids, err := s.repo.ActiveTradeIDs(ctx)
 	if err != nil {
 		logger.Warnf("PlanScheduler: 查询活跃策略失败(pending sweep): %v", err)
 		return
 	}
-	now := time.Now()
+	dirtyTrades := s.clearStalePendingTrades(ctx, ids, time.Now())
+	for _, tradeID := range dirtyTrades {
+		s.rebuildTrade(ctx, tradeID)
+	}
+}
+
+func (s *PlanScheduler) clearStalePendingTrades(ctx context.Context, ids []int, now time.Time) []int {
 	var dirtyTrades []int
 	for _, tradeID := range ids {
 		recs, err := s.repo.ListStrategyInstances(ctx, tradeID)
@@ -339,49 +343,67 @@ func (s *PlanScheduler) clearStalePending(ctx context.Context) {
 			logger.Warnf("PlanScheduler: pending sweep 读取策略实例失败 trade=%d err=%v", tradeID, err)
 			continue
 		}
-		updated := false
-		for _, rec := range recs {
-			if rec.Status != database.StrategyStatusPending {
-				continue
-			}
-			pendingAt := pendingTimestamp(rec)
-			if pendingAt.IsZero() || now.Sub(pendingAt) <= s.pendingTimeout {
-				continue
-			}
-			newState := strings.TrimSpace(rec.StateJSON)
-			if strings.TrimSpace(rec.PlanComponent) == "" {
-				if st, err := exit.DecodeTierPlanState(newState); err == nil {
-					st.PendingSince = 0
-					st.PendingOrderID = ""
-					st.PendingEvent = ""
-					newState = exit.EncodeTierPlanState(st)
-				}
-			} else {
-				if st, err := exit.DecodeTierComponentState(newState); err == nil {
-					st.Status = "waiting"
-					st.PendingSince = 0
-					st.PendingOrderID = ""
-					st.TriggeredAt = 0
-					st.TriggerPrice = 0
-					st.LastEvent = "pending_timeout"
-					newState = exit.EncodeTierComponentState(st)
-				}
-			}
-			inst := &exit.PlanInstance{Record: rec}
-			if ok := s.repo.PersistPlanState(ctx, inst, newState, database.StrategyStatusWaiting); !ok {
-				continue
-			}
-			updated = true
-			logger.Warnf("PlanScheduler: 已清理超时 pending trade=%d plan=%s component=%s pending_at=%s",
-				tradeID, strings.TrimSpace(rec.PlanID), strings.TrimSpace(rec.PlanComponent), pendingAt.Format(time.RFC3339))
-		}
-		if updated {
+		if s.clearPendingRecords(ctx, tradeID, recs, now) {
 			dirtyTrades = append(dirtyTrades, tradeID)
 		}
 	}
-	for _, tradeID := range dirtyTrades {
-		s.rebuildTrade(ctx, tradeID)
+	return dirtyTrades
+}
+
+func (s *PlanScheduler) clearPendingRecords(ctx context.Context, tradeID int, recs []database.StrategyInstanceRecord, now time.Time) bool {
+	updated := false
+	for _, rec := range recs {
+		pendingAt, expired := pendingExpired(rec, now, s.pendingTimeout)
+		if !expired {
+			continue
+		}
+		newState := resetPendingState(rec)
+		inst := &exit.PlanInstance{Record: rec}
+		if ok := s.repo.PersistPlanState(ctx, inst, newState, database.StrategyStatusWaiting); !ok {
+			continue
+		}
+		updated = true
+		logger.Warnf("PlanScheduler: 已清理超时 pending trade=%d plan=%s component=%s pending_at=%s",
+			tradeID, strings.TrimSpace(rec.PlanID), strings.TrimSpace(rec.PlanComponent), pendingAt.Format(time.RFC3339))
 	}
+	return updated
+}
+
+func pendingExpired(rec database.StrategyInstanceRecord, now time.Time, timeout time.Duration) (time.Time, bool) {
+	if rec.Status != database.StrategyStatusPending {
+		return time.Time{}, false
+	}
+	pendingAt := pendingTimestamp(rec)
+	if pendingAt.IsZero() {
+		return time.Time{}, false
+	}
+	if now.Sub(pendingAt) <= timeout {
+		return time.Time{}, false
+	}
+	return pendingAt, true
+}
+
+func resetPendingState(rec database.StrategyInstanceRecord) string {
+	newState := strings.TrimSpace(rec.StateJSON)
+	if strings.TrimSpace(rec.PlanComponent) == "" {
+		if st, err := exit.DecodeTierPlanState(newState); err == nil {
+			st.PendingSince = 0
+			st.PendingOrderID = ""
+			st.PendingEvent = ""
+			newState = exit.EncodeTierPlanState(st)
+		}
+		return newState
+	}
+	if st, err := exit.DecodeTierComponentState(newState); err == nil {
+		st.Status = "waiting"
+		st.PendingSince = 0
+		st.PendingOrderID = ""
+		st.TriggeredAt = 0
+		st.TriggerPrice = 0
+		st.LastEvent = "pending_timeout"
+		newState = exit.EncodeTierComponentState(st)
+	}
+	return newState
 }
 
 func pendingTimestamp(rec database.StrategyInstanceRecord) time.Time {

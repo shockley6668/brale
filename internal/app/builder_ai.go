@@ -51,6 +51,7 @@ func buildDecisionArtifacts(ctx context.Context, cfg brcfg.AIConfig, engine *dec
 			engine.Observer = obs
 		}
 		engine.AgentHistory = store
+		engine.ProviderHistory = store
 	}
 	logPath := cfg.DecisionLogPath
 	if abs, err := filepath.Abs(logPath); err == nil {

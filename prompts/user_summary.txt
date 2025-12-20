@@ -1,6 +1,7 @@
 {{if .Account}}{{.Account}}{{end}}
 {{if .Previous}}{{.Previous}}{{end}}
 {{if .Derivatives}}{{.Derivatives}}{{end}}
+{{if .PreviousProviders}}{{.PreviousProviders}}{{end}}
 {{if .Positions}}{{.Positions}}{{end}}
 {{if .Klines}}{{.Klines}}{{end}}
 {{if .Agents}}{{.Agents}}{{end}}

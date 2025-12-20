@@ -195,22 +195,33 @@ func describeATRComponent(base string, comp planComponentView, editable bool) (s
 		_ = json.Unmarshal(comp.State, &state)
 	}
 	status := normalizeStatus(comp.Status)
-	var triggered string
-	if isTriggeredStatus(status) {
-		switch {
-		case state.TrailingStopPrice > 0:
-			triggered = fmt.Sprintf("%s 已触发，当前保护价 %.2f", label, state.TrailingStopPrice)
-		case state.StopLossPrice > 0:
-			triggered = fmt.Sprintf("%s 已触发，当前止损 %.2f", label, state.StopLossPrice)
-		case state.TakeProfitPrice > 0:
-			triggered = fmt.Sprintf("%s 已触发，当前止盈 %.2f", label, state.TakeProfitPrice)
-		default:
-			triggered = fmt.Sprintf("%s 已触发", label)
-		}
-	}
+	triggered := atrTriggeredLine(label, state, status)
 	if !editable && triggered != "" {
 		return triggered, ""
 	}
+	details := atrDetailItems(comp, state)
+	line := atrDetailLine(label, details)
+	line = appendATRStateLine(line, state)
+	return triggered, line
+}
+
+func atrTriggeredLine(label string, state atrComponentStateView, status string) string {
+	if !isTriggeredStatus(status) {
+		return ""
+	}
+	switch {
+	case state.TrailingStopPrice > 0:
+		return fmt.Sprintf("%s 已触发，当前保护价 %.2f", label, state.TrailingStopPrice)
+	case state.StopLossPrice > 0:
+		return fmt.Sprintf("%s 已触发，当前止损 %.2f", label, state.StopLossPrice)
+	case state.TakeProfitPrice > 0:
+		return fmt.Sprintf("%s 已触发，当前止盈 %.2f", label, state.TakeProfitPrice)
+	default:
+		return fmt.Sprintf("%s 已触发", label)
+	}
+}
+
+func atrDetailItems(comp planComponentView, state atrComponentStateView) []string {
 	params := decodeRawMap(comp.Params)
 	atrValue := fetchFloat(params, "atr_value")
 	triggerMul := fetchFloat(params, "trigger_multiplier")
@@ -233,16 +244,24 @@ func describeATRComponent(base string, comp planComponentView, editable bool) (s
 	if initialMul > 0 {
 		details = append(details, fmt.Sprintf("初始%.2fx", initialMul))
 	}
-	line := fmt.Sprintf("%s: %s", label, strings.Join(details, " · "))
+	return details
+}
+
+func atrDetailLine(label string, details []string) string {
 	if len(details) == 0 {
-		line = fmt.Sprintf("%s: 参数待定", label)
+		return fmt.Sprintf("%s: 参数待定", label)
 	}
+	return fmt.Sprintf("%s: %s", label, strings.Join(details, " · "))
+}
+
+func appendATRStateLine(line string, state atrComponentStateView) string {
 	if state.TrailingActive && state.TrailingStopPrice > 0 {
-		line += fmt.Sprintf(" · 已激活保护价 %.2f", state.TrailingStopPrice)
-	} else if state.TrailingActivationPrice > 0 {
-		line += fmt.Sprintf(" · 激活价 %.2f", state.TrailingActivationPrice)
+		return line + fmt.Sprintf(" · 已激活保护价 %.2f", state.TrailingStopPrice)
 	}
-	return triggered, line
+	if state.TrailingActivationPrice > 0 {
+		return line + fmt.Sprintf(" · 激活价 %.2f", state.TrailingActivationPrice)
+	}
+	return line
 }
 
 func splitComponentName(name string) (string, string) {

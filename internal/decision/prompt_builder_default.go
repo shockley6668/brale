@@ -58,13 +58,14 @@ func (b *DefaultPromptBuilder) buildUserSummary(ctx context.Context, input Conte
 	b.refreshDerivativesOnDemand(ctx, input.Candidates, input.Directives)
 
 	sections := render.Sections{
-		Account:     b.renderAccountOverview(input.Account),
-		Previous:    b.renderPreviousReasoning(input.PreviousReasoning),
-		Derivatives: b.renderDerivativesMetrics(input.Candidates, input.Directives),
-		Positions:   b.renderPositionDetails(filterPositions(input.Positions, input.Candidates)),
-		Klines:      b.renderKlineWindows(input.Analysis),
-		Agents:      b.renderAgentBlocks(insights),
-		Guidelines:  b.renderOutputConstraints(input),
+		Account:           b.renderAccountOverview(input.Account),
+		Previous:          b.renderPreviousReasoning(input.PreviousReasoning),
+		Derivatives:       b.renderDerivativesMetrics(input.Candidates, input.Directives),
+		PreviousProviders: b.renderPreviousProviderOutputs(input.PreviousProviderOutputs),
+		Positions:         b.renderPositionDetails(filterPositions(input.Positions, input.Candidates)),
+		Klines:            b.renderKlineWindows(input.Analysis),
+		Agents:            b.renderAgentBlocks(insights),
+		Guidelines:        b.renderOutputConstraints(input),
 	}
 
 	var loader render.TemplateLoader

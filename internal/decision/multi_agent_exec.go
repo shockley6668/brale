@@ -85,7 +85,7 @@ func (e *DecisionEngine) executeAgentStage(ctx context.Context, stage agentStage
 		return ins
 	}
 	ins.ProviderID = provider.ID()
-	if prev := e.lookupPreviousAgentOutput(ctx, ctxs, stage.name, ins.ProviderID); prev != "" {
+	if prev := e.lookupPreviousAgentOutput(ctx, ctxs, stage.name, ins.ProviderID); prev.Output != "" {
 		user = appendPreviousAgentOutput(user, stage.name, ins.ProviderID, prev)
 		ins.User = user
 	}
@@ -111,25 +111,29 @@ func (e *DecisionEngine) executeAgentStage(ctx context.Context, stage agentStage
 	return ins
 }
 
-func (e *DecisionEngine) lookupPreviousAgentOutput(ctx context.Context, ctxs []AnalysisContext, stage, providerID string) string {
+func (e *DecisionEngine) lookupPreviousAgentOutput(ctx context.Context, ctxs []AnalysisContext, stage, providerID string) AgentOutputSnapshot {
 	if e == nil || e.AgentHistory == nil {
-		return ""
+		return AgentOutputSnapshot{}
 	}
 	symbol := agentSymbolFromContexts(ctxs)
 	if symbol == "" {
-		return ""
+		return AgentOutputSnapshot{}
 	}
 	stage = strings.TrimSpace(stage)
 	providerID = strings.TrimSpace(providerID)
 	if stage == "" || providerID == "" {
-		return ""
+		return AgentOutputSnapshot{}
 	}
 	out, err := e.AgentHistory.LatestAgentOutput(ctx, symbol, stage, providerID)
 	if err != nil {
 		logger.Debugf("lookupPreviousAgentOutput failed symbol=%s stage=%s provider=%s err=%v", symbol, stage, providerID, err)
-		return ""
+		return AgentOutputSnapshot{}
 	}
-	return strings.TrimSpace(out)
+	out.Output = strings.TrimSpace(out.Output)
+	if out.Output == "" {
+		return AgentOutputSnapshot{}
+	}
+	return out
 }
 
 func agentSymbolFromContexts(ctxs []AnalysisContext) string {
@@ -150,10 +154,10 @@ func agentSymbolFromContexts(ctxs []AnalysisContext) string {
 	return strings.ToUpper(strings.TrimSpace(symbol))
 }
 
-func appendPreviousAgentOutput(user, stage, providerID, previous string) string {
+func appendPreviousAgentOutput(user, stage, providerID string, previous AgentOutputSnapshot) string {
 	user = strings.TrimSpace(user)
-	previous = strings.TrimSpace(previous)
-	if user == "" || previous == "" {
+	previous.Output = strings.TrimSpace(previous.Output)
+	if user == "" || previous.Output == "" {
 		return user
 	}
 	stage = strings.TrimSpace(stage)
@@ -161,7 +165,7 @@ func appendPreviousAgentOutput(user, stage, providerID, previous string) string 
 	var b strings.Builder
 	b.WriteString(user)
 	b.WriteString("\n\n")
-	b.WriteString("# Previous Agent Output\n")
+	b.WriteString("# 上一轮输出的决策 (Previous Agent Output)\n")
 	if stage != "" || providerID != "" {
 		b.WriteString("stage=")
 		b.WriteString(stage)
@@ -169,8 +173,20 @@ func appendPreviousAgentOutput(user, stage, providerID, previous string) string 
 		b.WriteString(providerID)
 		b.WriteString("\n")
 	}
-	b.WriteString(previous)
+	if previous.Timestamp > 0 {
+		b.WriteString("执行时间=")
+		b.WriteString(formatAgentOutputTimestamp(previous.Timestamp))
+		b.WriteString("\n")
+	}
+	b.WriteString(previous.Output)
 	return strings.TrimSpace(b.String())
+}
+
+func formatAgentOutputTimestamp(ts int64) string {
+	if ts <= 0 {
+		return ""
+	}
+	return time.UnixMilli(ts).UTC().Format(time.RFC3339)
 }
 
 func (e *DecisionEngine) findAgentProvider(preferred string) provider.ModelProvider {

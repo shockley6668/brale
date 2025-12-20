@@ -8,7 +8,7 @@ desc.org
 
 config.yaml
 configs/config.yaml
-
+configs/user_data/freqtrade-config.json
 *_test
 *_test.go
 

@@ -670,25 +670,106 @@ func (s *DecisionLogStore) ListDecisionsByTraceID(ctx context.Context, traceID s
 	return list, rows.Err()
 }
 
-func (s *DecisionLogStore) LatestAgentOutput(ctx context.Context, symbol, stage, providerID string) (string, error) {
+func (s *DecisionLogStore) LatestAgentOutput(ctx context.Context, symbol, stage, providerID string) (decision.AgentOutputSnapshot, error) {
 	if s == nil {
-		return "", fmt.Errorf("decision log store 未初始化")
+		return decision.AgentOutputSnapshot{}, fmt.Errorf("decision log store 未初始化")
 	}
 	key, err := normalizeAgentOutputKey(symbol, stage, providerID)
 	if err != nil {
-		return "", err
+		return decision.AgentOutputSnapshot{}, err
 	}
-	if out, ok := s.getAgentOutputCache(key); ok {
-		return out, nil
+	if entry, ok := s.getAgentOutputCache(key); ok {
+		return decision.AgentOutputSnapshot{Output: entry.Output, Timestamp: entry.TS}, nil
 	}
 	if ctx != nil && ctx.Err() != nil {
-		return "", nil
+		return decision.AgentOutputSnapshot{}, nil
 	}
 	out, err := s.queryLatestAgentOutput(ctx, key)
-	if err != nil || out == "" {
+	if err != nil || strings.TrimSpace(out.Output) == "" {
 		return out, err
 	}
-	s.putAgentOutputCache(key, out)
+	s.putAgentOutputCache(key, agentOutputCacheEntry{Output: out.Output, TS: out.Timestamp})
+	return out, nil
+}
+
+func (s *DecisionLogStore) LatestProviderOutputs(ctx context.Context, symbol string) ([]decision.ProviderOutputSnapshot, error) {
+	if s == nil {
+		return nil, fmt.Errorf("decision log store 未初始化")
+	}
+	symbol = strings.ToUpper(strings.TrimSpace(symbol))
+	if symbol == "" {
+		return nil, fmt.Errorf("symbol 不能为空")
+	}
+	s.mu.Lock()
+	db := s.db
+	s.mu.Unlock()
+	if db == nil {
+		return nil, fmt.Errorf("decision log store 未初始化")
+	}
+	row := db.QueryRowContext(ctx, `SELECT trace_id FROM live_decision_logs
+		WHERE stage = 'provider' AND symbols LIKE ? AND trace_id IS NOT NULL AND trace_id != ''
+		ORDER BY ts DESC, id DESC
+		LIMIT 1`, symbolLikePattern(symbol))
+	var traceID sql.NullString
+	if err := row.Scan(&traceID); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	trace := strings.TrimSpace(traceID.String)
+	if trace == "" {
+		return nil, nil
+	}
+	rows, err := db.QueryContext(ctx, `SELECT provider_id, ts, decisions_json, raw_output
+		FROM live_decision_logs
+		WHERE trace_id = ? AND stage = 'provider'
+		ORDER BY ts ASC, id ASC`, trace)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	byProvider := make(map[string]decision.ProviderOutputSnapshot)
+	for rows.Next() {
+		var (
+			providerID string
+			ts         sql.NullInt64
+			decisions  sql.NullString
+			rawOutput  sql.NullString
+		)
+		if err := rows.Scan(&providerID, &ts, &decisions, &rawOutput); err != nil {
+			return nil, err
+		}
+		providerID = strings.TrimSpace(providerID)
+		if providerID == "" {
+			continue
+		}
+		out := decision.ProviderOutputSnapshot{
+			ProviderID: providerID,
+			Decisions:  filterDecisionsBySymbol(decodeDecisionArray(decisions.String), symbol),
+			RawOutput:  strings.TrimSpace(rawOutput.String),
+			Timestamp:  ts.Int64,
+		}
+		if prev, ok := byProvider[providerID]; !ok || out.Timestamp >= prev.Timestamp {
+			byProvider[providerID] = out
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(byProvider) == 0 {
+		return nil, nil
+	}
+	keys := make([]string, 0, len(byProvider))
+	for key := range byProvider {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	out := make([]decision.ProviderOutputSnapshot, 0, len(keys))
+	for _, key := range keys {
+		out = append(out, byProvider[key])
+	}
 	return out, nil
 }
 
@@ -711,27 +792,29 @@ func normalizeAgentOutputKey(symbol, stage, providerID string) (agentOutputCache
 	return agentOutputCacheKey{Symbol: symbol, Stage: stage, ProviderID: providerID}, nil
 }
 
-func (s *DecisionLogStore) getAgentOutputCache(key agentOutputCacheKey) (string, bool) {
+func (s *DecisionLogStore) getAgentOutputCache(key agentOutputCacheKey) (agentOutputCacheEntry, bool) {
 	s.agentCacheMu.RLock()
 	defer s.agentCacheMu.RUnlock()
 	if s.agentOutputCache == nil {
-		return "", false
+		return agentOutputCacheEntry{}, false
 	}
 	hit, ok := s.agentOutputCache[key]
 	if !ok {
-		return "", false
+		return agentOutputCacheEntry{}, false
 	}
-	out := strings.TrimSpace(hit.Output)
-	if out == "" {
-		return "", false
+	if strings.TrimSpace(hit.Output) == "" {
+		return agentOutputCacheEntry{}, false
 	}
-	return out, true
+	return hit, true
 }
 
-func (s *DecisionLogStore) putAgentOutputCache(key agentOutputCacheKey, out string) {
-	out = strings.TrimSpace(out)
-	if out == "" {
+func (s *DecisionLogStore) putAgentOutputCache(key agentOutputCacheKey, entry agentOutputCacheEntry) {
+	entry.Output = strings.TrimSpace(entry.Output)
+	if entry.Output == "" {
 		return
+	}
+	if entry.TS <= 0 {
+		entry.TS = time.Now().UnixMilli()
 	}
 	s.agentCacheMu.Lock()
 	defer s.agentCacheMu.Unlock()
@@ -739,30 +822,34 @@ func (s *DecisionLogStore) putAgentOutputCache(key agentOutputCacheKey, out stri
 		s.agentOutputCache = make(map[agentOutputCacheKey]agentOutputCacheEntry)
 	}
 	prev, ok := s.agentOutputCache[key]
-	if !ok || prev.TS <= 0 {
-		s.agentOutputCache[key] = agentOutputCacheEntry{Output: out, TS: time.Now().UnixMilli()}
+	if !ok || entry.TS >= prev.TS {
+		s.agentOutputCache[key] = entry
 	}
 }
 
-func (s *DecisionLogStore) queryLatestAgentOutput(ctx context.Context, key agentOutputCacheKey) (string, error) {
+func (s *DecisionLogStore) queryLatestAgentOutput(ctx context.Context, key agentOutputCacheKey) (decision.AgentOutputSnapshot, error) {
 	s.mu.Lock()
 	db := s.db
 	s.mu.Unlock()
 	if db == nil {
-		return "", fmt.Errorf("decision log store 未初始化")
+		return decision.AgentOutputSnapshot{}, fmt.Errorf("decision log store 未初始化")
 	}
-	row := db.QueryRowContext(ctx, `SELECT raw_output FROM live_decision_logs
+	row := db.QueryRowContext(ctx, `SELECT raw_output, ts FROM live_decision_logs
 		WHERE stage = ? AND provider_id = ? AND symbols LIKE ? AND raw_output IS NOT NULL AND raw_output != ''
 		ORDER BY ts DESC, id DESC
 		LIMIT 1`, key.Stage, key.ProviderID, symbolLikePattern(key.Symbol))
 	var raw sql.NullString
-	if err := row.Scan(&raw); err != nil {
+	var ts sql.NullInt64
+	if err := row.Scan(&raw, &ts); err != nil {
 		if err == sql.ErrNoRows {
-			return "", nil
+			return decision.AgentOutputSnapshot{}, nil
 		}
-		return "", err
+		return decision.AgentOutputSnapshot{}, err
 	}
-	return strings.TrimSpace(raw.String), nil
+	return decision.AgentOutputSnapshot{
+		Output:    strings.TrimSpace(raw.String),
+		Timestamp: ts.Int64,
+	}, nil
 }
 
 func (s *DecisionLogStore) ListDecisionsByTraceIDs(ctx context.Context, traceIDs []string) (map[string][]DecisionLogRecord, error) {
@@ -1260,6 +1347,22 @@ func decodeDecisionArray(raw string) []decision.Decision {
 		return nil
 	}
 	return arr
+}
+
+func filterDecisionsBySymbol(decisions []decision.Decision, symbol string) []decision.Decision {
+	if len(decisions) == 0 || strings.TrimSpace(symbol) == "" {
+		return decisions
+	}
+	filtered := decisions[:0]
+	for _, d := range decisions {
+		if strings.EqualFold(strings.TrimSpace(d.Symbol), symbol) {
+			filtered = append(filtered, d)
+		}
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	return filtered
 }
 
 func decodePositionArray(raw string) []decision.PositionSnapshot {

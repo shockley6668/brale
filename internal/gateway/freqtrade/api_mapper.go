@@ -260,6 +260,40 @@ func finalizeClosure(out *exchange.APIPosition, closeAtMillis int64, currentPric
 	}
 }
 
+func syncOpenOrderPnL(out *exchange.APIPosition, rec database.LiveOrderRecord, baseStake float64) {
+	realizedUSD := valOrZero(rec.RealizedPnLUSD)
+	realizedRatio := valOrZero(rec.RealizedPnLRatio)
+	totalUSD := valOrZero(rec.PnLUSD)
+	totalRatio := valOrZero(rec.PnLRatio)
+
+	if realizedUSD == 0 && totalUSD != 0 && out.UnrealizedPnLUSD != 0 {
+		realizedUSD = totalUSD - out.UnrealizedPnLUSD
+	}
+	if realizedRatio == 0 && baseStake > 0 && realizedUSD != 0 {
+		realizedRatio = realizedUSD / baseStake
+	}
+	if out.RealizedPnLUSD == 0 && realizedUSD != 0 {
+		out.RealizedPnLUSD = realizedUSD
+	}
+	if out.RealizedPnLRatio == 0 && realizedRatio != 0 {
+		out.RealizedPnLRatio = realizedRatio
+	}
+
+	if totalUSD == 0 && (realizedUSD != 0 || out.UnrealizedPnLUSD != 0) {
+		totalUSD = realizedUSD + out.UnrealizedPnLUSD
+	}
+	if totalRatio == 0 && baseStake > 0 && totalUSD != 0 {
+		totalRatio = totalUSD / baseStake
+	} else if totalRatio == 0 {
+		totalRatio = out.UnrealizedPnLRatio + realizedRatio
+	}
+
+	out.PnLUSD = totalUSD
+	if totalRatio != 0 {
+		out.PnLRatio = totalRatio
+	}
+}
+
 func liveOrderToAPIPosition(rec database.LiveOrderRecord, nowMillis int64) exchange.APIPosition {
 	times := buildOrderTimes(rec, nowMillis)
 	currentPrice := resolveCurrentPrice(rec)
@@ -271,37 +305,7 @@ func liveOrderToAPIPosition(rec database.LiveOrderRecord, nowMillis int64) excha
 	derivedUSD, derivedRatio := derivePnL(out.EntryPrice, out.CurrentPrice, out.Amount, out.Stake, out.Leverage, out.Side)
 	fillPnL(&out, rec.Status == database.LiveOrderStatusClosed, baseStake, pnlUSD, pnlRatio, derivedUSD, derivedRatio)
 	if rec.Status != database.LiveOrderStatusClosed {
-		realizedUSD := valOrZero(rec.RealizedPnLUSD)
-		realizedRatio := valOrZero(rec.RealizedPnLRatio)
-		totalUSD := valOrZero(rec.PnLUSD)
-		totalRatio := valOrZero(rec.PnLRatio)
-
-		if realizedUSD == 0 && totalUSD != 0 && out.UnrealizedPnLUSD != 0 {
-			realizedUSD = totalUSD - out.UnrealizedPnLUSD
-		}
-		if realizedRatio == 0 && baseStake > 0 && realizedUSD != 0 {
-			realizedRatio = realizedUSD / baseStake
-		}
-		if out.RealizedPnLUSD == 0 && realizedUSD != 0 {
-			out.RealizedPnLUSD = realizedUSD
-		}
-		if out.RealizedPnLRatio == 0 && realizedRatio != 0 {
-			out.RealizedPnLRatio = realizedRatio
-		}
-
-		if totalUSD == 0 && (realizedUSD != 0 || out.UnrealizedPnLUSD != 0) {
-			totalUSD = realizedUSD + out.UnrealizedPnLUSD
-		}
-		if totalRatio == 0 && baseStake > 0 && totalUSD != 0 {
-			totalRatio = totalUSD / baseStake
-		} else if totalRatio == 0 {
-			totalRatio = out.UnrealizedPnLRatio + realizedRatio
-		}
-
-		out.PnLUSD = totalUSD
-		if totalRatio != 0 {
-			out.PnLRatio = totalRatio
-		}
+		syncOpenOrderPnL(&out, rec, baseStake)
 	}
 
 	out.RemainingRatio = remainingRatio(rec)

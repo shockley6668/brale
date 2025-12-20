@@ -101,6 +101,56 @@ func (b *DefaultPromptBuilder) renderPreviousReasoning(reasonMap map[string]stri
 	return sb.String()
 }
 
+func (b *DefaultPromptBuilder) renderPreviousProviderOutputs(outputs []ProviderOutputSnapshot) string {
+	if len(outputs) == 0 {
+		return ""
+	}
+	sort.Slice(outputs, func(i, j int) bool {
+		return strings.TrimSpace(outputs[i].ProviderID) < strings.TrimSpace(outputs[j].ProviderID)
+	})
+	var sb strings.Builder
+	sb.WriteString("\n## 上一轮多模型输出\n")
+	for _, out := range outputs {
+		provider := strings.TrimSpace(out.ProviderID)
+		if provider == "" {
+			provider = "-"
+		}
+		summary := formatProviderOutputSummary(out)
+		sb.WriteString(fmt.Sprintf("- %s: %s\n", provider, summary))
+	}
+	return sb.String()
+}
+
+func formatProviderOutputSummary(out ProviderOutputSnapshot) string {
+	if len(out.Decisions) == 0 {
+		raw := strings.TrimSpace(out.RawOutput)
+		if raw == "" {
+			return "无有效决策"
+		}
+		return fmt.Sprintf("无有效决策，原始输出：%s", textutil.Truncate(raw, 800))
+	}
+	parts := make([]string, 0, len(out.Decisions))
+	for _, d := range out.Decisions {
+		action := strings.TrimSpace(d.Action)
+		if action == "" {
+			action = "unknown"
+		}
+		symbol := strings.ToUpper(strings.TrimSpace(d.Symbol))
+		reason := strings.TrimSpace(d.Reasoning)
+		if reason == "" {
+			reason = "无理由"
+		} else {
+			reason = textutil.Truncate(reason, 800)
+		}
+		if symbol != "" {
+			parts = append(parts, fmt.Sprintf("action=%s symbol=%s reasoning=%s", action, symbol, reason))
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("action=%s reasoning=%s", action, reason))
+	}
+	return strings.Join(parts, " | ")
+}
+
 func (b *DefaultPromptBuilder) renderOutputConstraints(input Context) string {
 	return renderOutputConstraints(input.ProfilePrompts, "只可以返回和示例一致格式的json数据，并且只可以有单个action。示例:")
 }

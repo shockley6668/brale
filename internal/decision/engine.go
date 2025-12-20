@@ -9,18 +9,19 @@ import (
 // Context is the full input to the LLM decision engine.
 // Built by scheduler each cycle from market data, positions, and profile configs.
 type Context struct {
-	Candidates        []string                     // Symbols to analyze this cycle
-	Market            map[string]MarketData        // Real-time market snapshot per symbol
-	Positions         []types.PositionSnapshot     // Currently open positions
-	Account           types.AccountSnapshot        // Balance, margin, equity
-	ProfilePrompts    map[string]ProfilePromptSpec // Per-symbol prompt configuration
-	Prompt            PromptBundle                 // Final rendered system+user prompts
-	Analysis          []AnalysisContext            // Klines, indicators, technical data
-	FeatureReports    []types.FeatureReport        // Middleware feature outputs
-	ExitPlanDirective string                       // Exit strategy constraints for prompt
-	PreviousReasoning map[string]string            // Last cycle's reasoning per symbol
-	Insights          []AgentInsight               // Multi-agent intermediate outputs
-	Directives        map[string]ProfileDirective  // Symbol-specific trading rules
+	Candidates              []string                     // Symbols to analyze this cycle
+	Market                  map[string]MarketData        // Real-time market snapshot per symbol
+	Positions               []types.PositionSnapshot     // Currently open positions
+	Account                 types.AccountSnapshot        // Balance, margin, equity
+	ProfilePrompts          map[string]ProfilePromptSpec // Per-symbol prompt configuration
+	Prompt                  PromptBundle                 // Final rendered system+user prompts
+	Analysis                []AnalysisContext            // Klines, indicators, technical data
+	FeatureReports          []types.FeatureReport        // Middleware feature outputs
+	ExitPlanDirective       string                       // Exit strategy constraints for prompt
+	PreviousReasoning       map[string]string            // Last cycle's reasoning per symbol
+	PreviousProviderOutputs []ProviderOutputSnapshot     // Last cycle's provider outputs for the symbol
+	Insights                []AgentInsight               // Multi-agent intermediate outputs
+	Directives              map[string]ProfileDirective  // Symbol-specific trading rules
 }
 
 // MarketData is the point-in-time snapshot of a symbol's market state.

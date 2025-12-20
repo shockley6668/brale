@@ -194,7 +194,7 @@ func (r *PlanRepository) LogTradeOperation(ctx context.Context, inst *exit.PlanI
 	if r == nil || r.store == nil || inst == nil || evt == nil {
 		return
 	}
-	op := operationFromEvent(evt.Type)
+	op := operationFromEvent(inst, evt)
 	if op == 0 {
 		return
 	}
@@ -514,9 +514,18 @@ func extractEventSymbol(inst *exit.PlanInstance, evt *exit.PlanEvent) string {
 	return ""
 }
 
-func operationFromEvent(evtType string) database.OperationType {
-	switch evtType {
-	case exit.PlanEventTypeTierHit, exit.PlanEventTypeTakeProfit, exit.PlanEventTypeFinalTakeProfit:
+func operationFromEvent(inst *exit.PlanInstance, evt *exit.PlanEvent) database.OperationType {
+	if evt == nil {
+		return 0
+	}
+	switch evt.Type {
+	case exit.PlanEventTypeTierHit:
+		mode := eventMode(inst, evt)
+		if mode == "stop_loss" {
+			return database.OperationStopLoss
+		}
+		return database.OperationTakeProfit
+	case exit.PlanEventTypeTakeProfit, exit.PlanEventTypeFinalTakeProfit:
 		return database.OperationTakeProfit
 	case exit.PlanEventTypeStopLoss:
 		return database.OperationStopLoss
@@ -525,6 +534,34 @@ func operationFromEvent(evtType string) database.OperationType {
 	default:
 		return 0
 	}
+}
+
+func eventMode(inst *exit.PlanInstance, evt *exit.PlanEvent) string {
+	mode := ""
+	if evt != nil && evt.Details != nil {
+		if raw, ok := evt.Details["mode"].(string); ok {
+			mode = raw
+		}
+	}
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode != "" {
+		return mode
+	}
+	component := ""
+	if evt != nil {
+		component = evt.PlanComponent
+	}
+	if component == "" && inst != nil {
+		component = inst.Record.PlanComponent
+	}
+	component = strings.ToLower(strings.TrimSpace(component))
+	if strings.HasPrefix(component, "sl_") || strings.Contains(component, ".sl_") {
+		return "stop_loss"
+	}
+	if strings.HasPrefix(component, "tp_") || strings.Contains(component, ".tp_") {
+		return "take_profit"
+	}
+	return ""
 }
 
 func buildPlanSnapshots(recs []database.StrategyInstanceRecord) []exit.StrategyPlanSnapshot {

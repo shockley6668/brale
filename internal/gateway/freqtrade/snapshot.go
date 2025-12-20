@@ -162,13 +162,115 @@ func convertToExchangeTradeEvents(recs []database.TradeOperationRecord) []exchan
 	}
 	out := make([]exchange.TradeEvent, len(recs))
 	for i, rec := range recs {
+		op := normalizeTradeOperation(rec)
 		out[i] = exchange.TradeEvent{
 			FreqtradeID: rec.FreqtradeID,
 			Symbol:      rec.Symbol,
-			Operation:   int(rec.Operation),
+			Operation:   int(op),
 			Details:     rec.Details,
 			Timestamp:   rec.Timestamp,
 		}
 	}
 	return out
+}
+
+func normalizeTradeOperation(rec database.TradeOperationRecord) database.OperationType {
+	op := rec.Operation
+	if len(rec.Details) == 0 {
+		return op
+	}
+	eventType, mode, component, alias := extractEventDetails(rec.Details)
+	switch eventType {
+	case exit.PlanEventTypeTierHit:
+		if isStopLossEvent(mode, component, alias) {
+			return database.OperationStopLoss
+		}
+		if isTakeProfitEvent(mode, component, alias) {
+			return database.OperationTakeProfit
+		}
+		if op == 0 {
+			return database.OperationTakeProfit
+		}
+		return op
+	case exit.PlanEventTypeTakeProfit, exit.PlanEventTypeFinalTakeProfit:
+		return database.OperationTakeProfit
+	case exit.PlanEventTypeStopLoss:
+		return database.OperationStopLoss
+	case exit.PlanEventTypeFinalStopLoss:
+		return database.OperationFinalStop
+	default:
+		if op == database.OperationTakeProfit && isStopLossEvent(mode, component, alias) {
+			return database.OperationStopLoss
+		}
+		if op == database.OperationStopLoss && isTakeProfitEvent(mode, component, alias) {
+			return database.OperationTakeProfit
+		}
+		return op
+	}
+}
+
+func extractEventDetails(details map[string]any) (string, string, string, string) {
+	eventType := readDetailString(details, "event_type")
+	component := readDetailString(details, "component")
+	mode := readDetailString(details, "mode")
+	alias := ""
+	if ctxRaw, ok := details["context"]; ok {
+		if ctx, ok := ctxRaw.(map[string]any); ok {
+			if mode == "" {
+				mode = readDetailString(ctx, "mode")
+			}
+			if component == "" {
+				component = readDetailString(ctx, "component")
+			}
+			alias = readDetailString(ctx, "combo_alias")
+		}
+	}
+	return eventType, mode, component, alias
+}
+
+func readDetailString(details map[string]any, key string) string {
+	if details == nil {
+		return ""
+	}
+	raw, ok := details[key]
+	if !ok {
+		return ""
+	}
+	val, ok := raw.(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(val)
+}
+
+func isStopLossEvent(mode, component, alias string) bool {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode == "stop_loss" {
+		return true
+	}
+	component = strings.ToLower(strings.TrimSpace(component))
+	if strings.HasPrefix(component, "sl_") || strings.Contains(component, ".sl_") {
+		return true
+	}
+	alias = strings.ToLower(strings.TrimSpace(alias))
+	if strings.HasPrefix(alias, "sl_") {
+		return true
+	}
+	return false
+}
+
+func isTakeProfitEvent(mode, component, alias string) bool {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode == "take_profit" {
+		return true
+	}
+	component = strings.ToLower(strings.TrimSpace(component))
+	if strings.HasPrefix(component, "tp_") || strings.Contains(component, ".tp_") {
+		return true
+	}
+	alias = strings.ToLower(strings.TrimSpace(alias))
+	if strings.HasPrefix(alias, "tp_") {
+		return true
+	}
+	return false
 }

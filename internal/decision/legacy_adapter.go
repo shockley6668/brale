@@ -24,11 +24,12 @@ import (
 )
 
 type DecisionEngine struct {
-	Providers     []provider.ModelProvider
-	Agg           Aggregator
-	Observer      DecisionObserver
-	AgentNotifier notifier.TextNotifier
-	AgentHistory  AgentOutputHistory
+	Providers       []provider.ModelProvider
+	Agg             Aggregator
+	Observer        DecisionObserver
+	AgentNotifier   notifier.TextNotifier
+	AgentHistory    AgentOutputHistory
+	ProviderHistory ProviderOutputHistory
 
 	PromptBuilder PromptBuilder
 	PromptMgr     *strategy.Manager
@@ -151,6 +152,9 @@ func (e *DecisionEngine) decideSingle(ctx context.Context, input Context, applyD
 	if e.PromptBuilder == nil {
 		return DecisionResult{}, fmt.Errorf("prompt builder not configured")
 	}
+	if prevProviders := e.lookupPreviousProviderOutputs(ctx, input); len(prevProviders) > 0 {
+		input.PreviousProviderOutputs = prevProviders
+	}
 	baseSys, usr, visionPayloads, err := e.PromptBuilder.Build(ctx, input, insights)
 	if err != nil {
 		return DecisionResult{}, err
@@ -244,6 +248,28 @@ func (e *DecisionEngine) logModelTables(outs []ModelOutput) {
 
 	tResults := RenderResultsTable(results, 0)
 	logger.InfoBlock(tResults)
+}
+
+func (e *DecisionEngine) lookupPreviousProviderOutputs(ctx context.Context, input Context) []ProviderOutputSnapshot {
+	if e == nil || e.ProviderHistory == nil {
+		return nil
+	}
+	symbol := ""
+	if len(input.Candidates) == 1 {
+		symbol = normalizeSymbol(input.Candidates[0])
+	}
+	if symbol == "" {
+		symbol = agentSymbolFromContexts(input.Analysis)
+	}
+	if symbol == "" {
+		return nil
+	}
+	out, err := e.ProviderHistory.LatestProviderOutputs(ctx, symbol)
+	if err != nil {
+		logger.Debugf("lookupPreviousProviderOutputs failed symbol=%s err=%v", symbol, err)
+		return nil
+	}
+	return out
 }
 
 func (e *DecisionEngine) loadTemplate(name string) string {

@@ -101,58 +101,104 @@ func paginateRange(total, offset, limit int) (int, int) {
 }
 
 func (m *Manager) listActivePositionsFromTrader(ctx context.Context, now int64, symbolFilter string) ([]exchange.APIPosition, bool) {
-	if m == nil || m.trader == nil {
+	positions := m.activeTraderPositions()
+	if len(positions) == 0 {
 		return nil, false
 	}
-	snap := m.trader.Snapshot()
-	if snap == nil || len(snap.Positions) == 0 {
-		return nil, false
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	realizedByTrade := map[int]database.LiveOrderRecord{}
-	if m.posRepo != nil {
-		if recs, err := m.posRepo.ListActivePositions(ctx, 500); err == nil {
-			for _, rec := range recs {
-				if symbolFilter != "" && !strings.EqualFold(rec.Symbol, symbolFilter) {
-					continue
-				}
-				if rec.FreqtradeID > 0 {
-					realizedByTrade[rec.FreqtradeID] = rec
-				}
-			}
-		}
-	}
-	list := make([]exchange.APIPosition, 0, len(snap.Positions))
-	for _, p := range snap.Positions {
-		if p == nil || !p.IsOpen {
-			continue
-		}
-		if symbolFilter != "" && !strings.EqualFold(p.Symbol, symbolFilter) {
-			continue
-		}
-		pos := exchangePositionToAPIPosition(*p, now)
-		if rec, ok := realizedByTrade[pos.TradeID]; ok {
-			realizedUSD := valOrZero(rec.RealizedPnLUSD)
-			if realizedUSD != 0 {
-				baseStake := deriveBaseStake(pos)
-				totalUSD := realizedUSD + pos.UnrealizedPnLUSD
-				pos.PnLUSD = totalUSD
-				if baseStake > 0 {
-					pos.PnLRatio = totalUSD / baseStake
-				} else if pos.PnLRatio == 0 {
-					pos.PnLRatio = pos.UnrealizedPnLRatio + valOrZero(rec.RealizedPnLRatio)
-				}
-			}
-		}
-		list = append(list, pos)
-	}
+	ctx = backgroundIfNil(ctx)
+	realizedByTrade := m.realizedByTrade(ctx, symbolFilter)
+	list := buildActivePositionsFromSnapshot(positions, now, symbolFilter, realizedByTrade)
 	if len(list) == 0 {
 		return nil, false
 	}
 	sort.Slice(list, func(i, j int) bool { return list[i].OpenedAt > list[j].OpenedAt })
 	return list, true
+}
+
+func (m *Manager) activeTraderPositions() map[string]*exchange.Position {
+	if m == nil || m.trader == nil {
+		return nil
+	}
+	snap := m.trader.Snapshot()
+	if snap == nil || len(snap.Positions) == 0 {
+		return nil
+	}
+	return snap.Positions
+}
+
+func backgroundIfNil(ctx context.Context) context.Context {
+	if ctx != nil {
+		return ctx
+	}
+	return context.Background()
+}
+
+func (m *Manager) realizedByTrade(ctx context.Context, symbolFilter string) map[int]database.LiveOrderRecord {
+	if m == nil || m.posRepo == nil {
+		return nil
+	}
+	recs, err := m.posRepo.ListActivePositions(ctx, 500)
+	if err != nil || len(recs) == 0 {
+		return nil
+	}
+	realized := make(map[int]database.LiveOrderRecord)
+	for _, rec := range recs {
+		if symbolFilter != "" && !strings.EqualFold(rec.Symbol, symbolFilter) {
+			continue
+		}
+		if rec.FreqtradeID > 0 {
+			realized[rec.FreqtradeID] = rec
+		}
+	}
+	if len(realized) == 0 {
+		return nil
+	}
+	return realized
+}
+
+func buildActivePositionsFromSnapshot(positions map[string]*exchange.Position, now int64, symbolFilter string, realizedByTrade map[int]database.LiveOrderRecord) []exchange.APIPosition {
+	if len(positions) == 0 {
+		return nil
+	}
+	list := make([]exchange.APIPosition, 0, len(positions))
+	for _, p := range positions {
+		if !includeTraderPosition(p, symbolFilter) {
+			continue
+		}
+		pos := exchangePositionToAPIPosition(*p, now)
+		if rec, ok := realizedByTrade[pos.TradeID]; ok {
+			applyRealizedPnL(&pos, rec)
+		}
+		list = append(list, pos)
+	}
+	return list
+}
+
+func includeTraderPosition(p *exchange.Position, symbolFilter string) bool {
+	if p == nil || !p.IsOpen {
+		return false
+	}
+	if symbolFilter == "" {
+		return true
+	}
+	return strings.EqualFold(p.Symbol, symbolFilter)
+}
+
+func applyRealizedPnL(pos *exchange.APIPosition, rec database.LiveOrderRecord) {
+	realizedUSD := valOrZero(rec.RealizedPnLUSD)
+	if realizedUSD == 0 {
+		return
+	}
+	baseStake := deriveBaseStake(*pos)
+	totalUSD := realizedUSD + pos.UnrealizedPnLUSD
+	pos.PnLUSD = totalUSD
+	if baseStake > 0 {
+		pos.PnLRatio = totalUSD / baseStake
+		return
+	}
+	if pos.PnLRatio == 0 {
+		pos.PnLRatio = pos.UnrealizedPnLRatio + valOrZero(rec.RealizedPnLRatio)
+	}
 }
 
 func (m *Manager) listActivePositionsFromRepo(ctx context.Context, now int64, params positionListParams) (exchange.PositionListResult, error) {
