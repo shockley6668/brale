@@ -102,7 +102,7 @@ func (b *DefaultPromptBuilder) renderPreviousReasoning(reasonMap map[string]stri
 }
 
 func (b *DefaultPromptBuilder) renderOutputConstraints(input Context) string {
-	return renderOutputConstraints(input.ProfilePrompts, "只可以返回json数据，并且只可以有单个action。示例:")
+	return renderOutputConstraints(input.ProfilePrompts, "只可以返回和示例一致格式的json数据，并且只可以有单个action。示例:")
 }
 
 func (b *DefaultPromptBuilder) renderDerivativesMetrics(ctxs []string, directives map[string]ProfileDirective) string {
