@@ -40,6 +40,7 @@ const (
 	// 默认: "https://fapi.binance.com"
 	// 重置: market.sources[0].rest_base_url (当配置为空时)
 	defaultMarketREST = "https://fapi.binance.com"
+	defaultGateREST   = "https://api.gateio.ws/api/v4"
 
 	// AI 决策聚合策略 (meta/first)
 	// 默认: "meta" (多模型投票)
@@ -349,11 +350,26 @@ func (m *MarketConfig) applyDefaults(keys keySet) {
 			}
 		}
 		if src.RESTBaseURL == "" {
-			src.RESTBaseURL = defaultMarketREST
+			if rest := defaultRESTBySource(src.Name); rest != "" {
+				src.RESTBaseURL = rest
+			} else {
+				src.RESTBaseURL = defaultMarketREST
+			}
 		}
 	}
 	if strings.TrimSpace(m.ActiveSource) == "" {
 		m.ActiveSource = firstEnabledMarket(m.Sources)
+	}
+}
+
+func defaultRESTBySource(name string) string {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "binance", "binance-futures":
+		return defaultMarketREST
+	case "gate":
+		return defaultGateREST
+	default:
+		return ""
 	}
 }
 

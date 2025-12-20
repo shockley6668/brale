@@ -6,6 +6,7 @@ import (
 
 	brcfg "brale/internal/config"
 	"brale/internal/gateway/binance"
+	"brale/internal/gateway/gate"
 	"brale/internal/market"
 )
 
@@ -18,6 +19,13 @@ func NewSourceFromConfig(cfg *brcfg.Config) (market.Source, error) {
 	switch name {
 	case "", "binance", "binance-futures":
 		return binance.New(binance.Config{
+			RESTBaseURL:  active.RESTBaseURL,
+			ProxyEnabled: active.Proxy.Enabled,
+			RESTProxyURL: active.Proxy.RESTURL,
+			WSProxyURL:   active.Proxy.WSURL,
+		})
+	case "gate":
+		return gate.New(gate.Config{
 			RESTBaseURL:  active.RESTBaseURL,
 			ProxyEnabled: active.Proxy.Enabled,
 			RESTProxyURL: active.Proxy.RESTURL,

@@ -23,6 +23,13 @@ market:
         enabled: false            # 是否启用代理
         rest_url: ""              # 代理后的 REST 地址（留空表示不走代理）
         ws_url: ""                # 代理后的 WS 地址（留空表示不走代理）
+    - name: "gate"
+      enabled: false
+      rest_base_url: ""           # 留空使用 Gate 默认 REST 地址
+      proxy:
+        enabled: false
+        rest_url: ""
+        ws_url: ""
 
 ai:
   # weights：用于 meta 聚合/投票时的模型权重（不聚合时可以忽略）

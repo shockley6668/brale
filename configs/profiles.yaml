@@ -10,7 +10,7 @@ profiles:
     context_tag: "ETH 分阶段策略"           # 上下文标签：用于 prompt/日志展示
     targets: ["ETH/USDT"]                   # 交易对列表（建议大写；支持多个）
     intervals: ["15m", "1h", "4h"]          # 订阅的 K 线周期（将汇总给模型）
-    decision_interval_multiple: 1           # 决策调度：最短周期 * 倍数（UTC 对齐）；例如最短 15m，倍数 4 => 每 1h 决策一次
+    decision_interval_multiple: 2           # 决策调度：最短周期 * 倍数（UTC 对齐）；例如最短 15m，倍数 4 => 每 1h 决策一次
     analysis_slice: 300                     # 每个周期截取最近 N 根 K 线参与分析
     slice_drop_tail: 1                      # 丢弃最新 N 根（避免最后一根未收线导致噪声）
     # middlewares 中如启用 ema/rsi/macd，将自动触发 Multi-Agent；若全部关闭则 Provider 阶段不会调用 Agent。
@@ -57,33 +57,33 @@ profiles:
       include_oi: true                       # 是否注入 Open Interest
       include_funding: true                  # 是否注入 Funding Rate
     exit_plans:
-      combos: ["tp_tiers__sl_single"]        # 允许的 exit_plan 组合 key（用于限定 children 模板）
+      combos: ["tp_tiers__sl_tiers"]        # 允许的 exit_plan 组合 key（用于限定 children 模板）
     # default: true                          # 可选：设为 true 表示默认 profile（当 symbol 未显式绑定时可作为兜底）
 
-  btc_plan_combo:
-    context_tag: "BTC 分阶段策略"
-    targets: ["BTC/USDT"]
-    intervals: ["15m"]
-    decision_interval_multiple: 1
-    analysis_slice: 160
-    slice_drop_tail: 1
-    middlewares:
-      - name: kline_fetcher
-        stage: 0
-        critical: true
-        timeout_seconds: 5
-        params:
-          intervals: ["15m"]
-          limit: 240
-    prompts:
-      user: "btc.txt"
-      system_by_model:
-        deepseek: "default.txt"
-        qwen: "default.txt"
-        doubao: "default.txt"
-    derivatives:
-      enabled: true
-      include_oi: true
-      include_funding: true
-    exit_plans:
-      combos: ["tp_tiers__sl_tiers"]
+#  btc_plan_combo:
+#    context_tag: "BTC 分阶段策略"
+#    targets: ["BTC/USDT"]
+#    intervals: ["15m"]
+#    decision_interval_multiple: 2
+#    analysis_slice: 160
+#    slice_drop_tail: 1
+#    middlewares:
+#      - name: kline_fetcher
+#        stage: 0
+#        critical: true
+#        timeout_seconds: 5
+#        params:
+#          intervals: ["15m"]
+#          limit: 240
+#    prompts:
+#      user: "btc.txt"
+#      system_by_model:
+#        deepseek: "default.txt"
+#        qwen: "default.txt"
+#        doubao: "default.txt"
+#    derivatives:
+#      enabled: true
+#      include_oi: true
+#      include_funding: true
+#    exit_plans:
+#      combos: ["tp_tiers__sl_tiers"]

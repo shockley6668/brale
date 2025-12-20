@@ -10,6 +10,7 @@ const (
 	FormatInternal  Format = "internal"
 	FormatBinance   Format = "binance"
 	FormatFreqtrade Format = "freqtrade"
+	FormatGate      Format = "gate"
 )
 
 type Converter interface {

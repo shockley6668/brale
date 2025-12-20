@@ -32,6 +32,10 @@ type MetricsService struct {
 	targetOIHistTimeframes []string
 }
 
+type oiPeriodProvider interface {
+	SupportedOIPeriods() []string
+}
+
 func (s *MetricsService) GetTargetTimeframes() []string {
 	return s.targetOIHistTimeframes
 }
@@ -66,9 +70,23 @@ func NewMetricsService(
 		return nil, fmt.Errorf("metrics configuration missing timeframes")
 	}
 
-	basePeriod, historyLimit, targetTimeframes := calculateOIHistoryParams(allTimeframes)
-	if basePeriod == "" {
-		return nil, fmt.Errorf("failed to calculate valid OI history params from timeframes: %v", allTimeframes)
+	targetTimeframes := allTimeframes
+	if provider, ok := source.(oiPeriodProvider); ok {
+		supported := normalizeTimeframes(provider.SupportedOIPeriods())
+		if len(supported) > 0 {
+			targetTimeframes = intersectTimeframes(targetTimeframes, supported)
+			if len(targetTimeframes) == 0 {
+				logger.Warnf("MetricsService: 无可用 OI 周期，将仅拉取 Funding (requested=%v, supported=%v)", allTimeframes, supported)
+			}
+		}
+	}
+
+	basePeriod, historyLimit := "", 0
+	if len(targetTimeframes) > 0 {
+		basePeriod, historyLimit, targetTimeframes = calculateOIHistoryParams(targetTimeframes)
+		if basePeriod == "" {
+			return nil, fmt.Errorf("failed to calculate valid OI history params from timeframes: %v", allTimeframes)
+		}
 	}
 
 	pollInterval := 5 * time.Minute
@@ -194,16 +212,18 @@ func (s *MetricsService) updateSymbol(ctx context.Context, symbol string) {
 	)
 
 	var wg sync.WaitGroup
-	wg.Add(2)
+	if s.baseOIHistoryPeriod != "" && s.oiHistoryLimit > 0 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			oiHist, errOI = s.source.GetOpenInterestHistory(ctx, symbol, s.baseOIHistoryPeriod, s.oiHistoryLimit)
+			if errOI != nil {
+				logger.Warnf("MetricsService: 获取 %s OI 历史失败: %v", symbol, errOI)
+			}
+		}()
+	}
 
-	go func() {
-		defer wg.Done()
-		oiHist, errOI = s.source.GetOpenInterestHistory(ctx, symbol, s.baseOIHistoryPeriod, s.oiHistoryLimit)
-		if errOI != nil {
-			logger.Warnf("MetricsService: 获取 %s OI 历史失败: %v", symbol, errOI)
-		}
-	}()
-
+	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		funding, errFund = s.source.GetFundingRate(ctx, symbol)
@@ -222,47 +242,48 @@ func (s *MetricsService) updateSymbol(ctx context.Context, symbol string) {
 
 	var allErrors strings.Builder
 
-	if errOI != nil {
-		allErrors.WriteString(fmt.Sprintf("获取OI历史失败: %v; ", errOI))
-	} else if len(oiHist) == 0 {
-		allErrors.WriteString("获取OI历史为空; ")
-	} else {
-
-		if len(oiHist) > 0 {
-			latestOI := oiHist[len(oiHist)-1].SumOpenInterest
-			newData.OI = latestOI
+	if s.baseOIHistoryPeriod != "" && s.oiHistoryLimit > 0 {
+		if errOI != nil {
+			allErrors.WriteString(fmt.Sprintf("获取OI历史失败: %v; ", errOI))
+		} else if len(oiHist) == 0 {
+			allErrors.WriteString("获取OI历史为空; ")
 		} else {
-			allErrors.WriteString("OI历史数据为空; ")
-		}
-
-		for _, tf := range s.targetOIHistTimeframes {
-			duration, err := parseTimeframe(tf)
-			if err != nil {
-				logger.Warnf("MetricsService: 无法解析目标周期 %s: %v", tf, err)
-				continue
-			}
-
-			targetTime := time.Now().Add(-duration)
-
-			var oiAtPastTime float64
-			found := false
-
-			for i := len(oiHist) - 1; i >= 0; i-- {
-				point := oiHist[i]
-				pointTime := time.UnixMilli(point.Timestamp)
-
-				if pointTime.Before(targetTime) || pointTime.Equal(targetTime) {
-					oiAtPastTime = point.SumOpenInterest
-					found = true
-					break
-				}
-			}
-			if found {
-				newData.OIHistory[tf] = oiAtPastTime
+			if len(oiHist) > 0 {
+				latestOI := oiHist[len(oiHist)-1].SumOpenInterest
+				newData.OI = latestOI
 			} else {
+				allErrors.WriteString("OI历史数据为空; ")
+			}
 
-				newData.OIHistory[tf] = 0
-				logger.Debugf("MetricsService: %s 无法找到 %s 周期前的 OI 数据", symbol, tf)
+			for _, tf := range s.targetOIHistTimeframes {
+				duration, err := parseTimeframe(tf)
+				if err != nil {
+					logger.Warnf("MetricsService: 无法解析目标周期 %s: %v", tf, err)
+					continue
+				}
+
+				targetTime := time.Now().Add(-duration)
+
+				var oiAtPastTime float64
+				found := false
+
+				for i := len(oiHist) - 1; i >= 0; i-- {
+					point := oiHist[i]
+					pointTime := time.UnixMilli(point.Timestamp)
+
+					if pointTime.Before(targetTime) || pointTime.Equal(targetTime) {
+						oiAtPastTime = point.SumOpenInterest
+						found = true
+						break
+					}
+				}
+				if found {
+					newData.OIHistory[tf] = oiAtPastTime
+				} else {
+
+					newData.OIHistory[tf] = 0
+					logger.Debugf("MetricsService: %s 无法找到 %s 周期前的 OI 数据", symbol, tf)
+				}
 			}
 		}
 	}
@@ -306,6 +327,23 @@ func normalizeTimeframes(items []string) []string {
 		out = append(out, tf)
 	}
 	return out
+}
+
+func intersectTimeframes(targets, supported []string) []string {
+	if len(targets) == 0 || len(supported) == 0 {
+		return nil
+	}
+	set := make(map[string]struct{}, len(supported))
+	for _, tf := range supported {
+		set[strings.ToLower(strings.TrimSpace(tf))] = struct{}{}
+	}
+	var out []string
+	for _, tf := range targets {
+		if _, ok := set[tf]; ok {
+			out = append(out, tf)
+		}
+	}
+	return normalizeTimeframes(out)
 }
 
 func calculateOIHistoryParams(horizonTimeframes []string) (basePeriod string, limit int, targetTimeframes []string) {

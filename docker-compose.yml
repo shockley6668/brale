@@ -14,6 +14,9 @@ services:
         condition: service_healthy
     ports:
       - "9991:9991"
+    dns:
+      - 223.5.5.5
+      - 8.8.8.8
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -48,6 +51,9 @@ services:
       - "BraleSharedStrategy"
     ports:
       - "8080:8080"
+    dns:
+      - 114.114.114.114
+      - 8.8.8.8
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
