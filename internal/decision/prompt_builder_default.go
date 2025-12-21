@@ -61,7 +61,7 @@ func (b *DefaultPromptBuilder) buildUserSummary(ctx context.Context, input Conte
 	b.refreshFearGreedOnDemand(ctx, input.Candidates, input.Directives)
 
 	sections := render.Sections{
-		Account:           b.renderAccountOverview(input.Account, input.Analysis),
+		Account:           b.renderAccountOverview(input.Account, input.Market),
 		Previous:          b.renderPreviousReasoning(input.PreviousReasoning),
 		PreviousProviders: b.renderPreviousProviderOutputs(input.PreviousProviderOutputs),
 		Positions:         b.renderPositionDetails(filterPositions(input.Positions, input.Candidates)),

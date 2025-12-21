@@ -412,11 +412,24 @@ func (e *LiveEngine) sense(ctx context.Context, symbols []string) (decision.Cont
 		logger.Warnf("GetAnalysisContexts failed: %v", err)
 	}
 	e.MktService.CaptureIndicators(analysis)
+	market := make(map[string]decision.MarketData)
+	for _, sym := range symbols {
+		symbol := strings.ToUpper(strings.TrimSpace(sym))
+		if symbol == "" {
+			continue
+		}
+		price := e.MktService.LatestPrice(ctx, symbol)
+		if price <= 0 {
+			continue
+		}
+		market[symbol] = decision.MarketData{Symbol: symbol, Price: price}
+	}
 	input := decision.Context{
 		Candidates: symbols,
 		Account:    acct,
 		Positions:  positions,
 		Analysis:   analysis,
+		Market:     market,
 	}
 	input.Directives = e.buildProfileDirectives(symbols)
 	if e.ProfileMgr != nil && e.PromptStrategy != nil {
