@@ -156,7 +156,7 @@ func (t *Trader) applyPositionOpened(payload json.RawMessage) error {
 
 	if t.posStore != nil && tradeID > 0 {
 		if err := t.upsertOpenedPositionDB(symbol, side, openedAt, tradeID, p); err != nil {
-			return err
+			logger.Warnf("Position opened DB sync failed for %s (trade=%d): %v", symbol, tradeID, err)
 		}
 	}
 

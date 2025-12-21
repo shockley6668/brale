@@ -543,14 +543,14 @@ func (t *Trader) handleOrderResult(payload []byte) error {
 		return t.processOpenSuccess(res)
 	case OrderActionClose:
 		return t.processCloseSuccess(res)
-		default:
-			logger.Warnf("OrderResult missing action for %s, inferring by state", res.Symbol)
-			if _, exists := t.state.Positions[symbol]; !exists {
-				return t.processOpenSuccess(res)
-			}
-			return t.processCloseSuccess(res)
+	default:
+		logger.Warnf("OrderResult missing action for %s, inferring by state", res.Symbol)
+		if _, exists := t.state.Positions[symbol]; !exists {
+			return t.processOpenSuccess(res)
 		}
+		return t.processCloseSuccess(res)
 	}
+}
 
 func (t *Trader) processOpenSuccess(res OrderResultPayload) error {
 	logger.Infof("Executor reported open success for %s (trade=%s)，等待 freqtrade webhook 对帐", res.Symbol, res.TradeID)
@@ -644,6 +644,14 @@ func (t *Trader) handlePlanEvent(payload []byte) error {
 	logger.Infof("Trader: Plan Event %s type=%s", symbol, p.EventType)
 
 	pos, ok := t.state.Positions[symbol]
+	if !ok || pos == nil {
+		if refreshed, err := t.resolvePositionForClose(symbol, p.TradeID); err == nil {
+			pos = refreshed
+			ok = true
+		} else {
+			logger.Warnf("Trader: Plan Event %s resolve position failed: %v", symbol, err)
+		}
+	}
 	side := ""
 	if ok {
 
@@ -668,6 +676,10 @@ func (t *Trader) handlePlanEvent(payload []byte) error {
 	}
 	tradeIDStr := strconv.Itoa(p.TradeID)
 	closeAmount := t.planEventAmount(p, pos)
+	if p.EventType == exit.PlanEventTypeTierHit && closeAmount <= 0 {
+		logger.Errorf("Trader: Plan Event %s tier hit but no position amount, fallback to full close", symbol)
+		closeAmount = 0
+	}
 	t.dispatchClose(symbol, side, closeAmount, newEventID("plan-close"), reason, tradeIDStr, p)
 	return nil
 }
@@ -690,9 +702,23 @@ func (t *Trader) handleSignalExit(payload []byte, traceID string) error {
 	if p.CloseRatio > 0 {
 		pos := t.state.Positions[symbol]
 		amount = t.calcCloseAmount(pos, p.CloseRatio, p.IsInitialRatio)
+		if amount <= 0 && p.CloseRatio < 1 {
+			if refreshed, err := t.resolvePositionForClose(symbol, p.TradeID); err == nil {
+				amount = t.calcCloseAmount(refreshed, p.CloseRatio, p.IsInitialRatio)
+			} else {
+				logger.Warnf("Trader: Signal Exit %s resolve position failed: %v", symbol, err)
+			}
+		}
+		if amount <= 0 && p.CloseRatio < 1 {
+			logger.Errorf("Trader: Signal Exit %s ratio=%.2f but no position amount, fallback to full close", symbol, p.CloseRatio)
+			amount = 0
+		}
 	}
 
 	tradeID := t.tradeIDForSymbol(symbol)
+	if tradeID == "" && p.TradeID > 0 {
+		tradeID = strconv.Itoa(p.TradeID)
+	}
 	t.dispatchClose(p.Symbol, p.Side, amount, traceID, "signal_exit", tradeID, p)
 	return nil
 }
@@ -702,6 +728,71 @@ func (t *Trader) calcCloseAmount(pos *exchange.Position, ratio float64, isInitia
 		return 0
 	}
 	return trading.CalcCloseAmount(pos.Amount, pos.InitialAmount, ratio, isInitial)
+}
+
+func (t *Trader) resolvePositionForClose(symbol string, tradeID int) (*exchange.Position, error) {
+	if t.state == nil {
+		return nil, fmt.Errorf("position state not initialized")
+	}
+	symbol = normalizeSymbol(symbol)
+	if symbol == "" {
+		return nil, fmt.Errorf("position symbol required")
+	}
+	if pos := t.state.Positions[symbol]; pos != nil && pos.Amount > 0 {
+		if pos.InitialAmount <= 0 {
+			pos.InitialAmount = pos.Amount
+		}
+		return pos, nil
+	}
+	if t.executor == nil {
+		return nil, fmt.Errorf("executor not initialized")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var pos *exchange.Position
+	if tradeID > 0 {
+		if fetched, err := t.executor.GetPosition(ctx, strconv.Itoa(tradeID)); err == nil && fetched != nil && fetched.IsOpen {
+			pos = fetched
+		} else if err != nil {
+			logger.Warnf("resolvePositionForClose: get position failed trade=%d: %v", tradeID, err)
+		}
+	}
+	if pos == nil {
+		positions, err := t.executor.ListOpenPositions(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("list open positions failed: %w", err)
+		}
+		for i := range positions {
+			if normalizeSymbol(positions[i].Symbol) == symbol && positions[i].IsOpen {
+				pos = &positions[i]
+				break
+			}
+		}
+	}
+	if pos == nil {
+		return nil, fmt.Errorf("no open position found for %s", symbol)
+	}
+	pos.Symbol = normalizeSymbol(pos.Symbol)
+	if pos.InitialAmount <= 0 {
+		pos.InitialAmount = pos.Amount
+	}
+	if pos.UpdatedAt.IsZero() {
+		pos.UpdatedAt = time.Now()
+	}
+	if pos.OpenedAt.IsZero() {
+		pos.OpenedAt = time.Now()
+	}
+	t.state.Positions[pos.Symbol] = pos
+	if pos.ID != "" {
+		t.state.ByTradeID[pos.ID] = pos.Symbol
+		t.state.SymbolIndex[pos.Symbol] = pos.ID
+	} else if tradeID > 0 {
+		id := strconv.Itoa(tradeID)
+		t.state.ByTradeID[id] = pos.Symbol
+		t.state.SymbolIndex[pos.Symbol] = id
+	}
+	return pos, nil
 }
 
 // dispatchClose Execute a close order asynchronously.

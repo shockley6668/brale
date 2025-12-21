@@ -28,7 +28,7 @@ func NewSqliteStore(path string) (*SqliteStore, error) {
 		return nil, err
 	}
 	// 提高 busy_timeout，减少高并发下的锁冲突
-	dsn := fmt.Sprintf("file:%s?_pragma=busy_timeout(15000)&_pragma=journal_mode(WAL)&cache=shared", path)
+	dsn := fmt.Sprintf("file:%s?_pragma=busy_timeout(15000)&_pragma=journal_mode(WAL)", path)
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger:                                   logger.Default.LogMode(logger.Silent),
 		DisableForeignKeyConstraintWhenMigrating: true,
@@ -72,6 +72,13 @@ func (s *SqliteStore) Begin(ctx context.Context) (store.UnitOfWork, error) {
 	return &gormUnitOfWork{tx: tx}, nil
 }
 
+func (s *SqliteStore) Read(ctx context.Context) (store.ReadUnitOfWork, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("sqlite store 未初始化")
+	}
+	return &gormReadUnitOfWork{db: s.db.WithContext(ctx)}, nil
+}
+
 func (s *SqliteStore) Close() error {
 	if s.db == nil {
 		return nil
@@ -85,6 +92,10 @@ func (s *SqliteStore) Close() error {
 
 type gormUnitOfWork struct {
 	tx *gorm.DB
+}
+
+type gormReadUnitOfWork struct {
+	db *gorm.DB
 }
 
 func (u *gormUnitOfWork) Orders() store.OrderRepository {
@@ -105,4 +116,20 @@ func (u *gormUnitOfWork) Commit() error {
 
 func (u *gormUnitOfWork) Rollback() error {
 	return u.tx.Rollback().Error
+}
+
+func (u *gormReadUnitOfWork) Orders() store.ReadOrderRepository {
+	return NewOrderRepo(u.db)
+}
+
+func (u *gormReadUnitOfWork) Strategies() store.ReadStrategyRepository {
+	return NewStrategyRepo(u.db)
+}
+
+func (u *gormReadUnitOfWork) Logs() store.ReadLogRepository {
+	return NewLogRepo(u.db)
+}
+
+func (u *gormReadUnitOfWork) Close() error {
+	return nil
 }

@@ -7,6 +7,7 @@ type Config struct {
 	Kline     KlineConfig     `toml:"kline"`
 	Market    MarketConfig    `toml:"market"`
 	AI        AIConfig        `toml:"ai"`
+	Store     StoreConfig     `toml:"store"`
 	MCP       MCPConfig       `toml:"mcp"`
 	Prompt    PromptConfig    `toml:"prompt"`
 	Notify    NotifyConfig    `toml:"notify"`
@@ -26,6 +27,10 @@ type AppConfig struct {
 
 type KlineConfig struct {
 	MaxCached int `toml:"max_cached"`
+}
+
+type StoreConfig struct {
+	LiveDBPath string `toml:"live_db_path"`
 }
 
 type MCPConfig struct {

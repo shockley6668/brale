@@ -35,7 +35,11 @@ func (p *Preheater) Preheat(ctx context.Context, symbols, intervals []string, li
 		for _, iv := range intervals {
 			batch, err := p.Source.FetchHistory(ctx, sym, iv, limit)
 			if err != nil {
-				logger.Warnf("[预热] 获取 %s %s 失败: %v", sym, iv, err)
+				logger.Errorf("[预热] 获取 %s %s 失败: %v", sym, iv, err)
+				continue
+			}
+			if len(batch) == 0 {
+				logger.Errorf("[预热] 获取 %s %s 返回空数据", sym, iv)
 				continue
 			}
 			if err := p.Store.Put(ctx, sym, iv, batch, p.Max); err != nil {
@@ -94,11 +98,11 @@ func (p *Preheater) Warmup(ctx context.Context, symbols []string, lookbacks map[
 				}
 				batch, err := p.Source.FetchHistory(ctx, sym, tf, limit)
 				if err != nil {
-					logger.Warnf("[warmup] 拉取 %s %s 失败: %v", sym, tf, err)
+					logger.Errorf("[warmup] 拉取 %s %s 失败: %v", sym, tf, err)
 					break
 				}
 				if len(batch) == 0 {
-					logger.Warnf("[warmup] 拉取 %s %s 得到空数据", sym, tf)
+					logger.Errorf("[warmup] 拉取 %s %s 得到空数据", sym, tf)
 					break
 				}
 				keep := p.Max

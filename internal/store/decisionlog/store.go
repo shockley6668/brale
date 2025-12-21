@@ -125,12 +125,12 @@ func NewDecisionLogStore(path string) (*DecisionLogStore, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
-	dsn := fmt.Sprintf("file:%s?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&cache=shared", path)
+	dsn := fmt.Sprintf("file:%s?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)", path)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(4)
+	db.SetMaxOpenConns(2)
 	db.SetMaxIdleConns(2)
 	if err := ensureDecisionLogSchema(db); err != nil {
 		if cerr := db.Close(); cerr != nil {

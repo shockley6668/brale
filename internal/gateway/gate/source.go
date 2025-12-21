@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"brale/internal/logger"
 	"brale/internal/market"
@@ -111,6 +112,7 @@ func (s *Source) FetchHistory(ctx context.Context, symbol, interval string, limi
 
 	kls, _, err := s.rest.FuturesApi.ListFuturesCandlesticks(ctx, gateSettle, exchangeSymbol, opts)
 	if err != nil {
+		logger.Errorf("[gate] fetch kline failed %s %s limit=%d: %v", symbol, interval, limit, err)
 		return nil, err
 	}
 
@@ -158,46 +160,10 @@ func (s *Source) Subscribe(ctx context.Context, symbols, intervals []string, opt
 	s.candleClose = cancel
 	s.candleMu.Unlock()
 
-	ws, err := s.newWsService(subCtx)
-	if err != nil {
-		s.recordSubscribeError(err)
-		return nil, err
-	}
-
 	out := make(chan market.CandleEvent, buffer)
-
-	ws.SetCallBack(gatews.ChannelFutureCandleStick, gatews.NewCallBack(func(msg *gatews.UpdateMsg) {
-		evt, ok := convertCandleUpdate(msg, symbolMap, cleanIntervals)
-		if !ok {
-			return
-		}
-		select {
-		case <-subCtx.Done():
-			return
-		case out <- evt:
-		default:
-			logger.Warnf("[gate] kline channel full, drop %s %s", evt.Symbol, evt.Interval)
-		}
-	}))
-
-	var firstErr error
-	for _, combo := range combos {
-		if err := ws.Subscribe(gatews.ChannelFutureCandleStick, []string{combo.interval, combo.contract}); err != nil {
-			firstErr = err
-			s.recordSubscribeError(err)
-		}
-	}
-
-	if firstErr != nil {
-		return nil, firstErr
-	}
-	if opts.OnConnect != nil {
-		opts.OnConnect()
-	}
-
 	go func() {
-		<-subCtx.Done()
-		close(out)
+		defer close(out)
+		s.runCandleLoop(subCtx, combos, symbolMap, cleanIntervals, out, opts)
 	}()
 	return out, nil
 }
@@ -222,48 +188,231 @@ func (s *Source) SubscribeTrades(ctx context.Context, symbols []string, opts mar
 	s.tradeClose = cancel
 	s.tradeMu.Unlock()
 
-	ws, err := s.newWsService(subCtx)
-	if err != nil {
-		s.recordSubscribeError(err)
-		return nil, err
-	}
-
 	out := make(chan market.TickEvent, buffer)
-
-	ws.SetCallBack(gatews.ChannelFutureTrade, gatews.NewCallBack(func(msg *gatews.UpdateMsg) {
-		evt, ok := convertTradeUpdate(msg, symbolMap)
-		if !ok {
-			return
-		}
-		select {
-		case <-subCtx.Done():
-			return
-		case out <- evt:
-		default:
-			logger.Warnf("[gate] trade channel full, drop %s", evt.Symbol)
-		}
-	}))
-
-	var firstErr error
-	for _, contract := range contracts {
-		if err := ws.Subscribe(gatews.ChannelFutureTrade, []string{contract}); err != nil {
-			firstErr = err
-			s.recordSubscribeError(err)
-		}
-	}
-
-	if firstErr != nil {
-		return nil, firstErr
-	}
-	if opts.OnConnect != nil {
-		opts.OnConnect()
-	}
-
 	go func() {
-		<-subCtx.Done()
-		close(out)
+		defer close(out)
+		s.runTradeLoop(subCtx, contracts, symbolMap, out, opts)
 	}()
 	return out, nil
+}
+
+func (s *Source) runCandleLoop(ctx context.Context, combos []gateSubscription, symbolMap map[string]string, cleanIntervals []string, out chan<- market.CandleEvent, opts market.SubscribeOptions) {
+	delay := time.Second
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		subCtx, cancel := context.WithCancel(ctx)
+		ws, err := s.newWsService(subCtx)
+		if err != nil {
+			s.recordSubscribeError(err)
+			if opts.OnDisconnect != nil {
+				opts.OnDisconnect(err)
+			}
+			cancel()
+			if !sleepWithContext(ctx, delay) {
+				return
+			}
+			delay = nextDelay(delay)
+			continue
+		}
+
+		ws.SetCallBack(gatews.ChannelFutureCandleStick, gatews.NewCallBack(func(msg *gatews.UpdateMsg) {
+			evt, ok := convertCandleUpdate(msg, symbolMap, cleanIntervals)
+			if !ok {
+				return
+			}
+			select {
+			case <-subCtx.Done():
+				return
+			case out <- evt:
+			default:
+				logger.Warnf("[gate] kline channel full, drop %s %s", evt.Symbol, evt.Interval)
+			}
+		}))
+
+		var firstErr error
+		for _, combo := range combos {
+			if err := ws.Subscribe(gatews.ChannelFutureCandleStick, []string{combo.interval, combo.contract}); err != nil {
+				firstErr = err
+				s.recordSubscribeError(err)
+			}
+		}
+
+		if firstErr != nil {
+			if opts.OnDisconnect != nil {
+				opts.OnDisconnect(firstErr)
+			}
+			cancel()
+			if conn := ws.GetConnection(); conn != nil {
+				_ = conn.Close()
+			}
+			if !sleepWithContext(ctx, delay) {
+				return
+			}
+			delay = nextDelay(delay)
+			continue
+		}
+
+		delay = time.Second
+		if opts.OnConnect != nil {
+			opts.OnConnect()
+		}
+
+		if err := s.monitorGateWS(subCtx, ws, opts); err != nil {
+			s.recordReconnect(err)
+			if opts.OnDisconnect != nil {
+				opts.OnDisconnect(err)
+			}
+		}
+		cancel()
+		if conn := ws.GetConnection(); conn != nil {
+			_ = conn.Close()
+		}
+		if !sleepWithContext(ctx, delay) {
+			return
+		}
+		delay = nextDelay(delay)
+	}
+}
+
+func (s *Source) runTradeLoop(ctx context.Context, contracts []string, symbolMap map[string]string, out chan<- market.TickEvent, opts market.SubscribeOptions) {
+	delay := time.Second
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		subCtx, cancel := context.WithCancel(ctx)
+		ws, err := s.newWsService(subCtx)
+		if err != nil {
+			s.recordSubscribeError(err)
+			if opts.OnDisconnect != nil {
+				opts.OnDisconnect(err)
+			}
+			cancel()
+			if !sleepWithContext(ctx, delay) {
+				return
+			}
+			delay = nextDelay(delay)
+			continue
+		}
+
+		ws.SetCallBack(gatews.ChannelFutureTrade, gatews.NewCallBack(func(msg *gatews.UpdateMsg) {
+			evt, ok := convertTradeUpdate(msg, symbolMap)
+			if !ok {
+				return
+			}
+			select {
+			case <-subCtx.Done():
+				return
+			case out <- evt:
+			default:
+				logger.Warnf("[gate] trade channel full, drop %s", evt.Symbol)
+			}
+		}))
+
+		var firstErr error
+		for _, contract := range contracts {
+			if err := ws.Subscribe(gatews.ChannelFutureTrade, []string{contract}); err != nil {
+				firstErr = err
+				s.recordSubscribeError(err)
+			}
+		}
+
+		if firstErr != nil {
+			if opts.OnDisconnect != nil {
+				opts.OnDisconnect(firstErr)
+			}
+			cancel()
+			if conn := ws.GetConnection(); conn != nil {
+				_ = conn.Close()
+			}
+			if !sleepWithContext(ctx, delay) {
+				return
+			}
+			delay = nextDelay(delay)
+			continue
+		}
+
+		delay = time.Second
+		if opts.OnConnect != nil {
+			opts.OnConnect()
+		}
+
+		if err := s.monitorGateWS(subCtx, ws, opts); err != nil {
+			s.recordReconnect(err)
+			if opts.OnDisconnect != nil {
+				opts.OnDisconnect(err)
+			}
+		}
+		cancel()
+		if conn := ws.GetConnection(); conn != nil {
+			_ = conn.Close()
+		}
+		if !sleepWithContext(ctx, delay) {
+			return
+		}
+		delay = nextDelay(delay)
+	}
+}
+
+func (s *Source) monitorGateWS(ctx context.Context, ws *gatews.WsService, opts market.SubscribeOptions) error {
+	const (
+		checkInterval = 5 * time.Second
+		maxReconnect  = 30 * time.Second
+	)
+	ticker := time.NewTicker(checkInterval)
+	defer ticker.Stop()
+
+	lastStatus := ""
+	reconnectSince := time.Time{}
+	if ws != nil {
+		lastStatus = ws.Status()
+		if lastStatus != "connected" {
+			reconnectSince = time.Now()
+		}
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			if ws == nil {
+				return fmt.Errorf("gate ws unavailable")
+			}
+			status := ws.Status()
+			if status != lastStatus {
+				if status == "connected" {
+					reconnectSince = time.Time{}
+					if opts.OnConnect != nil {
+						opts.OnConnect()
+					}
+				} else {
+					if lastStatus == "connected" {
+						s.recordReconnect(nil)
+					}
+					if reconnectSince.IsZero() {
+						reconnectSince = time.Now()
+					}
+					if opts.OnDisconnect != nil {
+						opts.OnDisconnect(fmt.Errorf("gate ws status=%s", status))
+					}
+				}
+				lastStatus = status
+			}
+			if status != "connected" {
+				if reconnectSince.IsZero() {
+					reconnectSince = time.Now()
+				}
+				if time.Since(reconnectSince) > maxReconnect {
+					return fmt.Errorf("gate ws reconnect timeout (%s)", status)
+				}
+			} else {
+				reconnectSince = time.Time{}
+			}
+		}
+	}
 }
 
 func (s *Source) newWsService(ctx context.Context) (*gatews.WsService, error) {
@@ -540,4 +689,35 @@ func (s *Source) recordSubscribeError(err error) {
 	s.stats.SubscribeErrors++
 	s.stats.LastError = err.Error()
 	s.statsMu.Unlock()
+}
+
+func (s *Source) recordReconnect(err error) {
+	s.statsMu.Lock()
+	s.stats.Reconnects++
+	if err != nil && err.Error() != "" {
+		s.stats.LastError = err.Error()
+	}
+	s.statsMu.Unlock()
+}
+
+func sleepWithContext(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+func nextDelay(current time.Duration) time.Duration {
+	if current <= 0 {
+		return time.Second
+	}
+	next := current * 2
+	if next > 30*time.Second {
+		next = 30 * time.Second
+	}
+	return next
 }

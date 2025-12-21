@@ -87,6 +87,7 @@ func (s *Source) FetchHistory(ctx context.Context, symbol, interval string, limi
 	svc := s.client.NewKlinesService().Symbol(cleanSymbol).Interval(interval).Limit(limit)
 	kls, err := svc.Do(ctx)
 	if err != nil {
+		logger.Errorf("[binance] fetch kline failed %s %s limit=%d: %v", symbol, interval, limit, err)
 		return nil, err
 	}
 	out := make([]market.Candle, 0, len(kls))

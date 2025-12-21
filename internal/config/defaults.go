@@ -136,6 +136,7 @@ func (c *Config) applyDefaults(keys keySet) {
 	c.MCP.applyDefaults(keys)
 	c.Market.applyDefaults(keys)
 	c.AI.applyDefaults(keys)
+	c.Store.applyDefaults(keys)
 	c.Freqtrade.applyDefaults(keys)
 	c.Advanced.applyDefaults(keys)
 	c.Trading.applyDefaults(keys)
@@ -164,6 +165,15 @@ func (k *KlineConfig) applyDefaults(keys keySet) {
 			need:  func() bool { return k.MaxCached <= 0 },
 			apply: func() { k.MaxCached = defaultKlineMaxCached },
 		},
+	)
+}
+
+func (s *StoreConfig) applyDefaults(keys keySet) {
+	if s == nil {
+		return
+	}
+	applyFieldDefaults(keys,
+		stringFieldDefault("store.live_db_path", &s.LiveDBPath, ""),
 	)
 }
 

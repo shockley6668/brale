@@ -26,23 +26,24 @@ func NewPositionRepo(kv store.Store, ps database.LivePositionStore) *PositionRep
 }
 
 func (r *PositionRepo) ListActivePositions(ctx context.Context, limit int) ([]database.LiveOrderRecord, error) {
-	if r.store != nil {
-		uow, err := r.store.Begin(ctx)
-		if err == nil {
-			defer func() { _ = uow.Rollback() }()
-			orders, err := uow.Orders().ListActive(ctx)
-			if err == nil && len(orders) > 0 {
-				var res []database.LiveOrderRecord
-				for _, o := range orders {
-					res = append(res, fromOrderModel(&o))
-				}
-				return res, nil
-			}
-		}
-	}
-
 	if r.posStore == nil {
-		return nil, nil
+		if r.store == nil {
+			return nil, nil
+		}
+		uow, err := r.store.Read(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = uow.Close() }()
+		orders, err := uow.Orders().ListActive(ctx)
+		if err != nil {
+			return nil, err
+		}
+		var res []database.LiveOrderRecord
+		for _, o := range orders {
+			res = append(res, fromOrderModel(&o))
+		}
+		return res, nil
 	}
 	return r.posStore.ListActivePositions(ctx, limit)
 }
@@ -60,11 +61,11 @@ func (r *PositionRepo) ListRecentPositionsPaged(ctx context.Context, symbol stri
 	if fetch <= 0 {
 		fetch = 100
 	}
-	uow, err := r.store.Begin(ctx)
+	uow, err := r.store.Read(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = uow.Rollback() }()
+	defer func() { _ = uow.Close() }()
 	orders, err := uow.Orders().ListRecent(ctx, fetch)
 	if err != nil {
 		return nil, err
@@ -91,19 +92,20 @@ func (r *PositionRepo) ListRecentPositionsPaged(ctx context.Context, symbol stri
 }
 
 func (r *PositionRepo) GetPosition(ctx context.Context, tradeID int) (database.LiveOrderRecord, bool, error) {
-	if r.store != nil {
-		uow, err := r.store.Begin(ctx)
-		if err == nil {
-			defer func() { _ = uow.Rollback() }()
-			order, err := uow.Orders().FindByID(ctx, tradeID)
-			if err == nil && order != nil {
-				return fromOrderModel(order), true, nil
-			}
-		}
-	}
-
 	if r.posStore == nil {
-		return database.LiveOrderRecord{}, false, nil
+		if r.store == nil {
+			return database.LiveOrderRecord{}, false, nil
+		}
+		uow, err := r.store.Read(ctx)
+		if err != nil {
+			return database.LiveOrderRecord{}, false, err
+		}
+		defer func() { _ = uow.Close() }()
+		order, err := uow.Orders().FindByID(ctx, tradeID)
+		if err != nil || order == nil {
+			return database.LiveOrderRecord{}, false, err
+		}
+		return fromOrderModel(order), true, nil
 	}
 	return r.posStore.GetLivePosition(ctx, tradeID)
 }
@@ -136,23 +138,24 @@ func (r *PositionRepo) SavePosition(ctx context.Context, rec database.LiveOrderR
 }
 
 func (r *PositionRepo) ListStrategyInstances(ctx context.Context, tradeID int) ([]database.StrategyInstanceRecord, error) {
-	if r.store != nil {
-		uow, err := r.store.Begin(ctx)
-		if err == nil {
-			defer func() { _ = uow.Rollback() }()
-			recs, err := uow.Strategies().FindByTradeID(ctx, tradeID)
-			if err == nil && len(recs) > 0 {
-				var out []database.StrategyInstanceRecord
-				for _, m := range recs {
-					out = append(out, fromStrategyModel(&m))
-				}
-				return out, nil
-			}
-		}
-	}
-
 	if r.posStore == nil {
-		return nil, nil
+		if r.store == nil {
+			return nil, nil
+		}
+		uow, err := r.store.Read(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = uow.Close() }()
+		recs, err := uow.Strategies().FindByTradeID(ctx, tradeID)
+		if err != nil {
+			return nil, err
+		}
+		var out []database.StrategyInstanceRecord
+		for _, m := range recs {
+			out = append(out, fromStrategyModel(&m))
+		}
+		return out, nil
 	}
 	return r.posStore.ListStrategyInstances(ctx, tradeID)
 }
@@ -194,23 +197,24 @@ func (r *PositionRepo) ListStrategyInstancesByTradeIDs(ctx context.Context, trad
 }
 
 func (r *PositionRepo) TradeEvents(ctx context.Context, tradeID int, limit int) ([]database.TradeOperationRecord, error) {
-	if r.store != nil {
-		uow, err := r.store.Begin(ctx)
-		if err == nil {
-			defer uow.Rollback()
-			logs, err := uow.Logs().ListTradeOperations(ctx, tradeID, limit)
-			if err == nil && len(logs) > 0 {
-				var out []database.TradeOperationRecord
-				for _, l := range logs {
-					out = append(out, fromOperationModel(&l))
-				}
-				return out, nil
-			}
-		}
-	}
-
 	if r.posStore == nil {
-		return nil, nil
+		if r.store == nil {
+			return nil, nil
+		}
+		uow, err := r.store.Read(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = uow.Close() }()
+		logs, err := uow.Logs().ListTradeOperations(ctx, tradeID, limit)
+		if err != nil {
+			return nil, err
+		}
+		var out []database.TradeOperationRecord
+		for _, l := range logs {
+			out = append(out, fromOperationModel(&l))
+		}
+		return out, nil
 	}
 	return r.posStore.ListTradeOperations(ctx, tradeID, limit)
 }

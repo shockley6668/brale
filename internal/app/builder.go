@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -289,11 +290,11 @@ func (b *AppBuilder) resolveStores(cfg *brcfg.Config, decArtifacts *decisionArti
 		return out, nil
 	}
 
-	path := strings.TrimSpace(cfg.AI.DecisionLogPath)
-	if path == "" {
-		return storeSetup{}, fmt.Errorf("ai.decision_log_path 未配置，无法初始化存储")
+	livePath, err := resolveLiveStorePath(cfg)
+	if err != nil {
+		return storeSetup{}, err
 	}
-	gormStore, err := gormstore.NewGormStore(path)
+	gormStore, err := gormstore.NewGormStore(livePath)
 	if err != nil {
 		return storeSetup{}, fmt.Errorf("初始化 gorm 存储失败: %w", err)
 	}
@@ -301,12 +302,16 @@ func (b *AppBuilder) resolveStores(cfg *brcfg.Config, decArtifacts *decisionArti
 	out.liveStore = gormStore
 	out.sharedGorm = gormStore.GormDB()
 
-	if err := attachDecisionLogDB(gormStore, decArtifacts); err != nil {
-		return storeSetup{}, err
+	if shouldShareDecisionLog(cfg, livePath) {
+		if err := attachDecisionLogDB(gormStore, decArtifacts); err != nil {
+			return storeSetup{}, err
+		}
+	} else if decArtifacts != nil && decArtifacts.store != nil {
+		logger.Infof("Decision log DB kept separate from live store (live=%s)", livePath)
 	}
 
 	if out.stateStore == nil {
-		ns, err := initStateStore(path, out.sharedGorm)
+		ns, err := initStateStore(livePath, out.sharedGorm)
 		if err != nil {
 			return storeSetup{}, err
 		}
@@ -348,6 +353,50 @@ func attachDecisionLogDB(gormStore *gormstore.GormStore, decArtifacts *decisionA
 		return fmt.Errorf("绑定决策日志存储失败: %w", err)
 	}
 	return nil
+}
+
+func resolveLiveStorePath(cfg *brcfg.Config) (string, error) {
+	if cfg == nil {
+		return "", fmt.Errorf("config 未初始化，无法初始化存储")
+	}
+	livePath := strings.TrimSpace(cfg.Store.LiveDBPath)
+	if livePath != "" {
+		return livePath, nil
+	}
+	if fallback := strings.TrimSpace(cfg.AI.DecisionLogPath); fallback != "" {
+		logger.Warnf("store.live_db_path 未配置，暂用 ai.decision_log_path 作为 live store")
+		return fallback, nil
+	}
+	return "", fmt.Errorf("store.live_db_path 未配置，且 ai.decision_log_path 为空")
+}
+
+func shouldShareDecisionLog(cfg *brcfg.Config, livePath string) bool {
+	if cfg == nil {
+		return false
+	}
+	decPath := strings.TrimSpace(cfg.AI.DecisionLogPath)
+	if decPath == "" {
+		return false
+	}
+	if livePath == "" {
+		return true
+	}
+	return samePath(decPath, livePath)
+}
+
+func samePath(a, b string) bool {
+	a = strings.TrimSpace(a)
+	b = strings.TrimSpace(b)
+	if a == "" || b == "" {
+		return false
+	}
+	if abs, err := filepath.Abs(a); err == nil {
+		a = abs
+	}
+	if abs, err := filepath.Abs(b); err == nil {
+		b = abs
+	}
+	return filepath.Clean(a) == filepath.Clean(b)
 }
 
 func initStateStore(path string, shared *gorm.DB) (store.Store, error) {

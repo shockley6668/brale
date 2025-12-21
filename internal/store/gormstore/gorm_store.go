@@ -51,7 +51,7 @@ func NewGormStore(path string) (*GormStore, error) {
 		return nil, err
 	}
 	// 提高 busy_timeout，减少高并发下的 “database is locked” 告警
-	dsn := fmt.Sprintf("file:%s?_pragma=busy_timeout(15000)&_pragma=journal_mode(WAL)&cache=shared", path)
+	dsn := fmt.Sprintf("file:%s?_pragma=busy_timeout(15000)&_pragma=journal_mode(WAL)", path)
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger:                                   logger.Default.LogMode(logger.Silent),
 		DisableForeignKeyConstraintWhenMigrating: true,

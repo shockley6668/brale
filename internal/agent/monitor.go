@@ -106,6 +106,11 @@ func (m *PriceMonitor) Start(ctx context.Context) {
 			}
 		}
 		m.updater.OnDisconnected = func(err error) {
+			if err != nil {
+				logger.Errorf("WS 断线: %v", err)
+			} else {
+				logger.Errorf("WS 断线")
+			}
 			if m.tg == nil {
 				return
 			}

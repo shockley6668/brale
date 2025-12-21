@@ -190,17 +190,22 @@ func (a *Adapter) tradeToExchangePosition(t *Trade) *exchange.Position {
 	}
 
 	openedAt := parseTradeTime(t.OpenDate)
+	initialAmt := t.Amount
+	if t.AmountRequested > 0 {
+		initialAmt = t.AmountRequested
+	}
 
 	return &exchange.Position{
-		ID:          strconv.Itoa(t.ID),
-		Symbol:      a.fromFreqtradePair(t.Pair),
-		Side:        side,
-		Amount:      t.Amount,
-		EntryPrice:  t.OpenRate,
-		Leverage:    t.Leverage,
-		StakeAmount: t.StakeAmount,
-		OpenedAt:    openedAt,
-		IsOpen:      t.IsOpen,
+		ID:            strconv.Itoa(t.ID),
+		Symbol:        a.fromFreqtradePair(t.Pair),
+		Side:          side,
+		Amount:        t.Amount,
+		InitialAmount: initialAmt,
+		EntryPrice:    t.OpenRate,
+		Leverage:      t.Leverage,
+		StakeAmount:   t.StakeAmount,
+		OpenedAt:      openedAt,
+		IsOpen:        t.IsOpen,
 
 		UnrealizedPnL:      t.ProfitAbs,
 		UnrealizedPnLRatio: t.ProfitRatio,

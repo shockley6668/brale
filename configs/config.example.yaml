@@ -39,7 +39,7 @@ ai:
     qwen: 1.0
     vanchin: 1.0
   active_horizon: "profiles"      # 仅作标签；真实配置在 profiles.yaml
-  decision_log_path: "/data/live/decisions.db" # 决策日志 DB 路径（上一轮多模型输出依赖该日志）
+  decision_log_path: "/data/live/decisions.db" # 决策日志 DB 路径（仅用于决策记录）
   provider_preference: ["deepseek", "qwen"] # 默认模型选择顺序（第一个启用且可用的会被选中）
   multi_agent:
     enabled: true                 # 是否启用 Multi-Agent（指标/形态/趋势分工）
@@ -77,6 +77,9 @@ ai:
       model: "doubao-seed-1.6-thinking"
       supports_vision: false
       expect_json: false
+
+store:
+  live_db_path: "/data/live/live.db" # live/plan/事件等运行态 DB（留空则复用 ai.decision_log_path）
 
 notify:
   telegram:
