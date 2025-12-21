@@ -317,8 +317,6 @@ func (b *DefaultPromptBuilder) buildDerivativesSection(ctx context.Context, ctxs
 				sb.WriteString(fmt.Sprintf("    - CVD: %s\n", cvd.Value.StringFixed(2)))
 				sb.WriteString(fmt.Sprintf("      - CVD_MOM: %s\n", cvd.Momentum.StringFixed(2)))
 				sb.WriteString(fmt.Sprintf("      - CVD_NORM: %s\n", cvd.Normalized.StringFixed(6)))
-				sb.WriteString(fmt.Sprintf("      - CVD_DIVERGENCE: %s\n", cvd.Divergence))
-				sb.WriteString(fmt.Sprintf("      - CVD_PEAKFLIP: %s\n", cvd.PeakFlip))
 				hasData = true
 				fp.WriteString("|cvd=")
 				fp.WriteString(cvd.Value.StringFixed(2))
@@ -326,38 +324,17 @@ func (b *DefaultPromptBuilder) buildDerivativesSection(ctx context.Context, ctxs
 				fp.WriteString(cvd.Momentum.StringFixed(2))
 				fp.WriteString("|norm=")
 				fp.WriteString(cvd.Normalized.StringFixed(6))
-				fp.WriteString("|div=")
-				fp.WriteString(cvd.Divergence)
-				fp.WriteString("|flip=")
-				fp.WriteString(cvd.PeakFlip)
 			} else {
 				sb.WriteString("    - CVD: 无数据\n")
 			}
 
 			if b.Sentiment != nil {
 				if sent, ok := b.Sentiment.Calculate(ctx, sym, iv, candles); ok {
-					sb.WriteString(fmt.Sprintf("    - 情绪评分: %d/100 (%s)\n", sent.Score, sent.Tag))
-					sb.WriteString(fmt.Sprintf("      - OI情绪: %s\n", sent.Factors.OpenInterest.StringFixed(3)))
-					sb.WriteString(fmt.Sprintf("      - Funding情绪: %s\n", sent.Factors.FundingRate.StringFixed(3)))
-					sb.WriteString(fmt.Sprintf("      - 大户情绪: %s\n", sent.Factors.BigWhales.StringFixed(3)))
-					sb.WriteString(fmt.Sprintf("      - 大户账户: %s\n", sent.Factors.BigAccounts.StringFixed(3)))
-					sb.WriteString(fmt.Sprintf("      - 散户反向: %s\n", sent.Factors.RetailInverse.StringFixed(3)))
-					sb.WriteString(fmt.Sprintf("      - 成交量情绪: %s\n", sent.Factors.VolumeEmotion.StringFixed(3)))
+					sb.WriteString(fmt.Sprintf("    - 情绪评分: %d/100\n", sent.Score))
+					sb.WriteString("      - 注：情绪评分为粗背景(0-100)，不可单独作为方向依据。\n")
 					hasData = true
 					fp.WriteString("|sent=")
 					fp.WriteString(fmt.Sprintf("%d", sent.Score))
-					fp.WriteString("|oi_s=")
-					fp.WriteString(sent.Factors.OpenInterest.StringFixed(3))
-					fp.WriteString("|fund_s=")
-					fp.WriteString(sent.Factors.FundingRate.StringFixed(3))
-					fp.WriteString("|big=")
-					fp.WriteString(sent.Factors.BigWhales.StringFixed(3))
-					fp.WriteString("|big_acc=")
-					fp.WriteString(sent.Factors.BigAccounts.StringFixed(3))
-					fp.WriteString("|retail=")
-					fp.WriteString(sent.Factors.RetailInverse.StringFixed(3))
-					fp.WriteString("|vol=")
-					fp.WriteString(sent.Factors.VolumeEmotion.StringFixed(3))
 				} else {
 					sb.WriteString("    - 情绪评分: 无数据\n")
 				}

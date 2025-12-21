@@ -2,13 +2,15 @@ package decision
 
 import (
 	"fmt"
+	"sort"
 	"strings"
+	"time"
 
 	formatutil "brale/internal/pkg/format"
 	"brale/internal/types"
 )
 
-func (b *DefaultPromptBuilder) renderAccountOverview(account types.AccountSnapshot) string {
+func (b *DefaultPromptBuilder) renderAccountOverview(account types.AccountSnapshot, ctxs []AnalysisContext) string {
 	var sb strings.Builder
 	if account.Total <= 0 && account.Available <= 0 && account.Used <= 0 {
 		return ""
@@ -26,7 +28,59 @@ func (b *DefaultPromptBuilder) renderAccountOverview(account types.AccountSnapsh
 		line += fmt.Sprintf(" · 已使用: %.2f", account.Used)
 	}
 	sb.WriteString(line + "\n")
+	if prices := collectLatestPrices(ctxs); len(prices) > 0 {
+		keys := make([]string, 0, len(prices))
+		for sym := range prices {
+			keys = append(keys, sym)
+		}
+		sort.Strings(keys)
+		for _, sym := range keys {
+			p := prices[sym]
+			if p.Price <= 0 {
+				continue
+			}
+			if p.Timestamp > 0 {
+				ts := time.UnixMilli(p.Timestamp).UTC().Format(time.RFC3339)
+				sb.WriteString(fmt.Sprintf("- 实时价格 %s: %.4f (%s)\n", sym, p.Price, ts))
+			} else {
+				sb.WriteString(fmt.Sprintf("- 实时价格 %s: %.4f\n", sym, p.Price))
+			}
+		}
+	}
 	return sb.String()
+}
+
+type latestPrice struct {
+	Price     float64
+	Timestamp int64
+}
+
+func collectLatestPrices(ctxs []AnalysisContext) map[string]latestPrice {
+	if len(ctxs) == 0 {
+		return nil
+	}
+	out := make(map[string]latestPrice)
+	for _, ac := range ctxs {
+		sym := strings.ToUpper(strings.TrimSpace(ac.Symbol))
+		if sym == "" || strings.TrimSpace(ac.KlineJSON) == "" {
+			continue
+		}
+		bars, err := parseRecentCandles(ac.KlineJSON, 1)
+		if err != nil || len(bars) == 0 {
+			continue
+		}
+		bar := bars[len(bars)-1]
+		ts := bar.CloseTime
+		if ts <= 0 {
+			ts = bar.OpenTime
+		}
+		prev, ok := out[sym]
+		if ok && ts <= prev.Timestamp {
+			continue
+		}
+		out[sym] = latestPrice{Price: bar.Close, Timestamp: ts}
+	}
+	return out
 }
 
 func (b *DefaultPromptBuilder) renderPositionDetails(positions []PositionSnapshot) string {
