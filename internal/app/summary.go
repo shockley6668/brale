@@ -91,41 +91,6 @@ func (s *StartupSummary) Print() {
 		}
 	}
 
-	fmt.Println("[提示词与约束 (PROMPTS & CONSTRAINTS)]")
-	if len(s.SymbolDetails) == 0 {
-		fmt.Println("  (无)")
-	} else {
-		symbols := make([]string, 0, len(s.SymbolDetails))
-		for sym := range s.SymbolDetails {
-			symbols = append(symbols, sym)
-		}
-		sort.Strings(symbols)
-
-		for _, sym := range symbols {
-			detail := s.SymbolDetails[sym]
-			fmt.Printf("  > %s:\n", sym)
-
-			printPrompt := func(role, name string) {
-				content, ok := s.Prompts[name]
-				if !ok {
-					fmt.Printf("    [%s Prompt] %s: (未找到内容)\n", role, name)
-					return
-				}
-				preview := content
-				lines := strings.Split(content, "\n")
-				if len(lines) > 5 {
-					preview = strings.Join(lines[:5], "\n") + "\n    ... (truncated)"
-				}
-
-				preview = strings.ReplaceAll(preview, "\n", "\n    ")
-				fmt.Printf("    [%s Prompt] %s:\n    %s\n", role, name, preview)
-			}
-
-			printPrompt("System", detail.SystemPrompt)
-			printPrompt("User", detail.UserPrompt)
-			fmt.Println()
-		}
-	}
 	fmt.Println(strings.Repeat("=", 80))
 }
 

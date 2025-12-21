@@ -4,29 +4,32 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"brale/internal/decision/render"
 	"brale/internal/gateway/provider"
 	"brale/internal/market"
 	"brale/internal/strategy"
-
-	"golang.org/x/sync/errgroup"
 )
 
 // DefaultPromptBuilder is the production prompt builder used by DecisionEngine.
 // It assembles the user summary (account/positions/klines/agents/constraints) and returns optional images.
 type DefaultPromptBuilder struct {
 	PromptMgr             *strategy.Manager
+	Store                 market.KlineStore
 	Metrics               *market.MetricsService
+	Sentiment             *market.SentimentService
+	FearGreed             *market.FearGreedService
 	Intervals             []string
 	DebugStructuredBlocks bool
 }
 
-func NewDefaultPromptBuilder(promptMgr *strategy.Manager, metrics *market.MetricsService, intervals []string, debug bool) *DefaultPromptBuilder {
+func NewDefaultPromptBuilder(promptMgr *strategy.Manager, store market.KlineStore, metrics *market.MetricsService, sentiment *market.SentimentService, fearGreed *market.FearGreedService, intervals []string, debug bool) *DefaultPromptBuilder {
 	out := &DefaultPromptBuilder{
 		PromptMgr:             promptMgr,
+		Store:                 store,
 		Metrics:               metrics,
+		Sentiment:             sentiment,
+		FearGreed:             fearGreed,
 		DebugStructuredBlocks: debug,
 	}
 	if len(intervals) > 0 {
@@ -55,15 +58,14 @@ func (b *DefaultPromptBuilder) Build(ctx context.Context, input Context, insight
 }
 
 func (b *DefaultPromptBuilder) buildUserSummary(ctx context.Context, input Context, insights []AgentInsight) string {
-	b.refreshDerivativesOnDemand(ctx, input.Candidates, input.Directives)
+	b.refreshFearGreedOnDemand(ctx, input.Candidates, input.Directives)
 
 	sections := render.Sections{
 		Account:           b.renderAccountOverview(input.Account),
 		Previous:          b.renderPreviousReasoning(input.PreviousReasoning),
-		Derivatives:       b.renderDerivativesMetrics(input.Candidates, input.Directives),
 		PreviousProviders: b.renderPreviousProviderOutputs(input.PreviousProviderOutputs),
 		Positions:         b.renderPositionDetails(filterPositions(input.Positions, input.Candidates)),
-		Klines:            b.renderKlineWindows(input.Analysis),
+		Klines:            b.renderKlineWindows(input.Analysis, input.Directives),
 		Agents:            b.renderAgentBlocks(insights),
 		Guidelines:        b.renderOutputConstraints(input),
 	}
@@ -77,43 +79,18 @@ func (b *DefaultPromptBuilder) buildUserSummary(ctx context.Context, input Conte
 	return summary
 }
 
-func (b *DefaultPromptBuilder) refreshDerivativesOnDemand(ctx context.Context, symbols []string, directives map[string]ProfileDirective) {
-	if b == nil || b.Metrics == nil || len(symbols) == 0 || len(directives) == 0 {
+func (b *DefaultPromptBuilder) refreshFearGreedOnDemand(ctx context.Context, symbols []string, directives map[string]ProfileDirective) {
+	if b == nil || b.FearGreed == nil || len(symbols) == 0 || len(directives) == 0 {
 		return
 	}
-
-	need := make([]string, 0, len(symbols))
 	for _, sym := range symbols {
 		dir, ok := lookupDirective(sym, directives)
-		if !ok || !dir.allowDerivatives() {
+		if !ok || !dir.DerivativesEnabled || !dir.IncludeFearGreed {
 			continue
 		}
-		s := strings.ToUpper(strings.TrimSpace(sym))
-		if s == "" {
-			continue
-		}
-		need = append(need, s)
-	}
-	if len(need) == 0 {
+		b.FearGreed.RefreshIfStale(ctx)
 		return
 	}
-
-	base := ctx
-	if base == nil {
-		base = context.Background()
-	}
-	var eg errgroup.Group
-	eg.SetLimit(4)
-	for _, sym := range need {
-		sym := sym
-		eg.Go(func() error {
-			refreshCtx, cancel := context.WithTimeout(base, 5*time.Second)
-			defer cancel()
-			b.Metrics.RefreshSymbol(refreshCtx, sym)
-			return nil
-		})
-	}
-	_ = eg.Wait()
 }
 
 func (b *DefaultPromptBuilder) collectVisionPayloads(ctxs []AnalysisContext) []provider.ImagePayload {

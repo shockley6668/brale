@@ -3,8 +3,9 @@ package decision
 import "context"
 
 type AgentOutputSnapshot struct {
-	Output    string
-	Timestamp int64
+	Output      string
+	Fingerprint string
+	Timestamp   int64
 }
 
 type AgentOutputHistory interface {

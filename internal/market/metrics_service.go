@@ -391,8 +391,8 @@ func calculateOIHistoryParams(horizonTimeframes []string) (basePeriod string, li
 		"1d":  24 * time.Hour,
 	}
 
-	actualBasePeriod := "1h"
-	actualBaseDuration := 1 * time.Hour
+	actualBasePeriod := "30m"
+	actualBaseDuration := 30 * time.Minute
 	for p, d := range binanceOIPeriods {
 		if d <= minDuration && d > actualBaseDuration {
 			actualBaseDuration = d

@@ -95,15 +95,19 @@ func (s *Source) FetchHistory(ctx context.Context, symbol, interval string, limi
 		if kl == nil {
 			continue
 		}
+		vol := parseFloat(kl.Volume)
+		buyVol := parseFloat(kl.TakerBuyBaseAssetVolume)
 		c := market.Candle{
-			OpenTime:  kl.OpenTime,
-			CloseTime: kl.CloseTime,
-			Open:      parseFloat(kl.Open),
-			High:      parseFloat(kl.High),
-			Low:       parseFloat(kl.Low),
-			Close:     parseFloat(kl.Close),
-			Volume:    parseFloat(kl.Volume),
-			Trades:    kl.TradeNum,
+			OpenTime:        kl.OpenTime,
+			CloseTime:       kl.CloseTime,
+			Open:            parseFloat(kl.Open),
+			High:            parseFloat(kl.High),
+			Low:             parseFloat(kl.Low),
+			Close:           parseFloat(kl.Close),
+			Volume:          vol,
+			TakerBuyVolume:  buyVol,
+			TakerSellVolume: vol - buyVol,
+			Trades:          kl.TradeNum,
 		}
 		out = append(out, c)
 	}
@@ -398,15 +402,19 @@ func convertKlineEvent(ev *futures.WsKlineEvent) (market.CandleEvent, bool) {
 	if ev == nil {
 		return market.CandleEvent{}, false
 	}
+	vol := parseFloat(ev.Kline.Volume)
+	buyVol := parseFloat(ev.Kline.ActiveBuyVolume)
 	c := market.Candle{
-		OpenTime:  ev.Kline.StartTime,
-		CloseTime: ev.Kline.EndTime,
-		Open:      parseFloat(ev.Kline.Open),
-		High:      parseFloat(ev.Kline.High),
-		Low:       parseFloat(ev.Kline.Low),
-		Close:     parseFloat(ev.Kline.Close),
-		Volume:    parseFloat(ev.Kline.Volume),
-		Trades:    ev.Kline.TradeNum,
+		OpenTime:        ev.Kline.StartTime,
+		CloseTime:       ev.Kline.EndTime,
+		Open:            parseFloat(ev.Kline.Open),
+		High:            parseFloat(ev.Kline.High),
+		Low:             parseFloat(ev.Kline.Low),
+		Close:           parseFloat(ev.Kline.Close),
+		Volume:          vol,
+		TakerBuyVolume:  buyVol,
+		TakerSellVolume: vol - buyVol,
+		Trades:          ev.Kline.TradeNum,
 	}
 	symbol := strings.ToUpper(strings.TrimSpace(ev.Symbol))
 	interval := strings.ToLower(strings.TrimSpace(ev.Kline.Interval))

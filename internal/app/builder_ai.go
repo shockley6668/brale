@@ -29,6 +29,8 @@ type engineConfig struct {
 	FinalDisabled      map[string]bool
 	LogEachModel       bool
 	Metrics            *market.MetricsService
+	Sentiment          *market.SentimentService
+	FearGreed          *market.FearGreedService
 	TimeoutSeconds     int
 }
 
@@ -160,7 +162,7 @@ func buildDecisionEngine(cfg engineConfig) *decision.DecisionEngine {
 		LogEachModel:       cfg.LogEachModel,
 		TimeoutSeconds:     cfg.TimeoutSeconds,
 	}
-	engine.PromptBuilder = decision.NewDefaultPromptBuilder(cfg.PromptMgr, cfg.Metrics, cfg.Intervals, cfg.LogEachModel)
+	engine.PromptBuilder = decision.NewDefaultPromptBuilder(cfg.PromptMgr, cfg.Store, cfg.Metrics, cfg.Sentiment, cfg.FearGreed, cfg.Intervals, cfg.LogEachModel)
 	return engine
 }
 

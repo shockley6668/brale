@@ -4,6 +4,7 @@ import (
 	"brale/internal/pkg/circuit"
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"brale/internal/agent/engine"
@@ -19,12 +20,15 @@ import (
 	"brale/internal/profile"
 	promptkit "brale/internal/prompt"
 	"brale/internal/strategy/exit"
+
+	"golang.org/x/sync/errgroup"
 )
 
 type LiveServiceParams struct {
 	Config          *brcfg.Config
 	KlineStore      market.KlineStore
 	Updater         *market.WSUpdater
+	Metrics         *market.MetricsService
 	Engine          decision.Decider
 	Telegram        *notifier.Telegram
 	DecisionLogs    *database.DecisionLogStore
@@ -67,6 +71,8 @@ type LiveService struct {
 	}
 
 	circuitBreaker *circuit.CircuitBreaker
+
+	metrics *market.MetricsService
 }
 
 func NewLiveService(p LiveServiceParams) *LiveService {
@@ -145,6 +151,7 @@ func NewLiveService(p LiveServiceParams) *LiveService {
 		liveEngine:     liveEngine,
 		tg:             p.Telegram,
 		decLogs:        p.DecisionLogs,
+		metrics:        p.Metrics,
 		horizonName:    p.HorizonName,
 		hSummary:       p.HorizonSummary,
 		warmupSummary:  p.WarmupSummary,
@@ -173,6 +180,10 @@ func NewLiveService(p LiveServiceParams) *LiveService {
 }
 
 func (s *LiveService) Run(ctx context.Context) error {
+	if s.metrics != nil {
+		go s.metrics.Start(ctx)
+	}
+	s.prewarmDerivatives(ctx)
 	if s.planScheduler != nil {
 		s.planScheduler.Start(ctx)
 	}
@@ -185,4 +196,51 @@ func (s *LiveService) Run(ctx context.Context) error {
 	}
 
 	return fmt.Errorf("live engine not initialized")
+}
+
+func (s *LiveService) prewarmDerivatives(ctx context.Context) {
+	if s == nil {
+		return
+	}
+	base := ctx
+	if base == nil {
+		base = context.Background()
+	}
+	if s.metrics != nil && len(s.symbols) > 0 {
+		go func() {
+			var eg errgroup.Group
+			eg.SetLimit(4)
+			for _, sym := range s.symbols {
+				sym := strings.TrimSpace(sym)
+				if sym == "" {
+					continue
+				}
+				eg.Go(func() error {
+					refreshCtx, cancel := context.WithTimeout(base, 5*time.Second)
+					defer cancel()
+					s.metrics.RefreshSymbol(refreshCtx, sym)
+					return nil
+				})
+			}
+			_ = eg.Wait()
+		}()
+	}
+	if fg := s.lookupFearGreedService(); fg != nil {
+		go fg.RefreshIfStale(base)
+	}
+}
+
+func (s *LiveService) lookupFearGreedService() *market.FearGreedService {
+	if s == nil || s.liveEngine == nil || s.liveEngine.Decider == nil {
+		return nil
+	}
+	eng, ok := s.liveEngine.Decider.(*decision.DecisionEngine)
+	if !ok || eng.PromptBuilder == nil {
+		return nil
+	}
+	pb, ok := eng.PromptBuilder.(*decision.DefaultPromptBuilder)
+	if !ok {
+		return nil
+	}
+	return pb.FearGreed
 }

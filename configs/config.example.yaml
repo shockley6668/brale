@@ -46,9 +46,11 @@ ai:
     indicator_provider: "deepseek" # 指标 Agent 使用的模型 id
     pattern_provider: "qwen"       # 形态 Agent 使用的模型 id
     trend_provider: "vanchin"      # 趋势 Agent 使用的模型 id
+    mechanics_provider: "qwen"     # 衍生品/市场力学 Agent 使用的模型 id
     indicator_template: "agent_indicator" # prompts/ 下的模板名（不含 .txt）
     pattern_template: "agent_pattern"
     trend_template: "agent_trend"
+    mechanics_template: "agent_mechanics"
   models:
     # models：模型列表；id 需要全局唯一，并在 provider_preference / multi_agent.*_provider 中引用
     # supports_vision：是否支持图片输入（如接入带视觉的模型）

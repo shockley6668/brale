@@ -36,8 +36,9 @@ type agentOutputCacheKey struct {
 }
 
 type agentOutputCacheEntry struct {
-	Output string
-	TS     int64
+	Output      string
+	Fingerprint string
+	TS          int64
 }
 
 type DecisionLogRecord struct {
@@ -452,6 +453,7 @@ func (s *DecisionLogStore) maybeCacheAgentOutput(rec DecisionLogRecord, ts int64
 	if output == "" {
 		return
 	}
+	fingerprint := parseAgentFingerprint(rec.Note)
 	if len(rec.Symbols) == 0 {
 		return
 	}
@@ -467,7 +469,7 @@ func (s *DecisionLogStore) maybeCacheAgentOutput(rec DecisionLogRecord, ts int64
 		key := agentOutputCacheKey{Symbol: symbol, Stage: stage, ProviderID: providerID}
 		prev, ok := s.agentOutputCache[key]
 		if !ok || ts >= prev.TS {
-			s.agentOutputCache[key] = agentOutputCacheEntry{Output: output, TS: ts}
+			s.agentOutputCache[key] = agentOutputCacheEntry{Output: output, TS: ts, Fingerprint: fingerprint}
 		}
 	}
 	s.agentCacheMu.Unlock()
@@ -679,7 +681,7 @@ func (s *DecisionLogStore) LatestAgentOutput(ctx context.Context, symbol, stage,
 		return decision.AgentOutputSnapshot{}, err
 	}
 	if entry, ok := s.getAgentOutputCache(key); ok {
-		return decision.AgentOutputSnapshot{Output: entry.Output, Timestamp: entry.TS}, nil
+		return decision.AgentOutputSnapshot{Output: entry.Output, Timestamp: entry.TS, Fingerprint: entry.Fingerprint}, nil
 	}
 	if ctx != nil && ctx.Err() != nil {
 		return decision.AgentOutputSnapshot{}, nil
@@ -688,7 +690,7 @@ func (s *DecisionLogStore) LatestAgentOutput(ctx context.Context, symbol, stage,
 	if err != nil || strings.TrimSpace(out.Output) == "" {
 		return out, err
 	}
-	s.putAgentOutputCache(key, agentOutputCacheEntry{Output: out.Output, TS: out.Timestamp})
+	s.putAgentOutputCache(key, agentOutputCacheEntry{Output: out.Output, TS: out.Timestamp, Fingerprint: out.Fingerprint})
 	return out, nil
 }
 
@@ -792,6 +794,21 @@ func normalizeAgentOutputKey(symbol, stage, providerID string) (agentOutputCache
 	return agentOutputCacheKey{Symbol: symbol, Stage: stage, ProviderID: providerID}, nil
 }
 
+func parseAgentFingerprint(note string) string {
+	note = strings.TrimSpace(note)
+	if note == "" {
+		return ""
+	}
+	parts := strings.Split(note, "|")
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if strings.HasPrefix(part, "fp=") {
+			return strings.TrimPrefix(part, "fp=")
+		}
+	}
+	return ""
+}
+
 func (s *DecisionLogStore) getAgentOutputCache(key agentOutputCacheKey) (agentOutputCacheEntry, bool) {
 	s.agentCacheMu.RLock()
 	defer s.agentCacheMu.RUnlock()
@@ -834,21 +851,23 @@ func (s *DecisionLogStore) queryLatestAgentOutput(ctx context.Context, key agent
 	if db == nil {
 		return decision.AgentOutputSnapshot{}, fmt.Errorf("decision log store 未初始化")
 	}
-	row := db.QueryRowContext(ctx, `SELECT raw_output, ts FROM live_decision_logs
+	row := db.QueryRowContext(ctx, `SELECT raw_output, ts, note FROM live_decision_logs
 		WHERE stage = ? AND provider_id = ? AND symbols LIKE ? AND raw_output IS NOT NULL AND raw_output != ''
 		ORDER BY ts DESC, id DESC
 		LIMIT 1`, key.Stage, key.ProviderID, symbolLikePattern(key.Symbol))
 	var raw sql.NullString
 	var ts sql.NullInt64
-	if err := row.Scan(&raw, &ts); err != nil {
+	var note sql.NullString
+	if err := row.Scan(&raw, &ts, &note); err != nil {
 		if err == sql.ErrNoRows {
 			return decision.AgentOutputSnapshot{}, nil
 		}
 		return decision.AgentOutputSnapshot{}, err
 	}
 	return decision.AgentOutputSnapshot{
-		Output:    strings.TrimSpace(raw.String),
-		Timestamp: ts.Int64,
+		Output:      strings.TrimSpace(raw.String),
+		Fingerprint: parseAgentFingerprint(note.String),
+		Timestamp:   ts.Int64,
 	}, nil
 }
 
@@ -1005,10 +1024,14 @@ func (o *DecisionLogObserver) logAgentInsights(ctx context.Context, base Decisio
 		rec.Meta = ""
 		rec.Decisions = nil
 		rec.Symbols = mergeSymbolLists(nil, candidateSymbols)
-		rec.Note = "agent"
+		noteParts := []string{"agent"}
 		if ins.Warned {
-			rec.Note += "|warned"
+			noteParts = append(noteParts, "warned")
 		}
+		if fp := strings.TrimSpace(ins.Fingerprint); fp != "" {
+			noteParts = append(noteParts, "fp="+fp)
+		}
+		rec.Note = strings.Join(noteParts, "|")
 		rec.Error = ins.Error
 		if _, err := o.store.Insert(ctx, rec); err != nil {
 			logger.Warnf("写入决策日志失败(agent:%s): %v", stage, err)

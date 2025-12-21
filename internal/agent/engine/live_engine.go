@@ -465,7 +465,9 @@ func (e *LiveEngine) buildProfileDirectives(symbols []string) map[string]decisio
 			DerivativesEnabled: rt.Derivatives.Enabled,
 			IncludeOI:          rt.Derivatives.IncludeOI,
 			IncludeFunding:     rt.Derivatives.IncludeFunding,
+			IncludeFearGreed:   rt.Derivatives.IncludeFearGreed,
 			MultiAgentEnabled:  rt.AgentEnabled,
+			IncludeKlines:      rt.KlineWindowsEnabled,
 		}
 	}
 	return directives

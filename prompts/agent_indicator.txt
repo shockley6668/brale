@@ -3,6 +3,11 @@
 - 需要用中文总结“多头/空头动能”“量价配合”“波动率/趋势”三类要点。
 - 请对每个 symbol×interval 点名关键信号（例如 RSI 超买、MACD 柱翻绿、EMA 排列、ATR 抬升）。
 - 指出最强和最弱的时间框架，并说明原因。
+- 约束：
+  - 仅允许使用技术指标与价格窗口数据。
+  - 禁止引用 OI/Funding/F&G/多空比/CVD/情绪/衍生品数据。
+  - 禁止给出交易动作或明确方向结论（如开多/开空/买入/卖出）。
+  - 数据不足时仅说明“数据不足”，不要继续推断。
 - 指标快照以 JSON 给出：
 * `_meta.series_order` 表示 `last_n` 数组从旧到新。OLDEST → NEWEST。
 * `market.current_price` 是当前价格，`delta_to_price`/`delta_pct` 是“现价 - 均线”。

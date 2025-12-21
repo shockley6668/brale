@@ -27,6 +27,7 @@ type ProfileDefinition struct {
 	Prompts                  PromptRefs         `mapstructure:"prompts"`
 	ExitPlans                ExitPlanBinding    `mapstructure:"exit_plans"`
 	Derivatives              DerivativesConfig  `mapstructure:"derivatives"`
+	KlineWindows             KlineWindowConfig  `mapstructure:"kline_windows"`
 	Default                  bool               `mapstructure:"default"`
 
 	targetsUpper   []string
@@ -70,9 +71,10 @@ func (b ExitPlanBinding) ComboKeys() []string {
 }
 
 type DerivativesConfig struct {
-	Enabled        bool `mapstructure:"enabled"`
-	IncludeOI      bool `mapstructure:"include_oi"`
-	IncludeFunding bool `mapstructure:"include_funding"`
+	Enabled          bool `mapstructure:"enabled"`
+	IncludeOI        bool `mapstructure:"include_oi"`
+	IncludeFunding   bool `mapstructure:"include_funding"`
+	IncludeFearGreed bool `mapstructure:"include_fear_greed"`
 }
 
 func (d *DerivativesConfig) normalize() {
@@ -82,13 +84,35 @@ func (d *DerivativesConfig) normalize() {
 	if !d.Enabled {
 		d.IncludeOI = false
 		d.IncludeFunding = false
+		d.IncludeFearGreed = false
 		return
 	}
 
-	if !d.IncludeOI && !d.IncludeFunding {
+	if !d.IncludeOI && !d.IncludeFunding && !d.IncludeFearGreed {
 		d.IncludeOI = true
 		d.IncludeFunding = true
 	}
+}
+
+type KlineWindowConfig struct {
+	Enabled *bool `mapstructure:"enabled"`
+}
+
+func (k *KlineWindowConfig) normalize() {
+	if k == nil {
+		return
+	}
+	if k.Enabled == nil {
+		enabled := true
+		k.Enabled = &enabled
+	}
+}
+
+func (k KlineWindowConfig) IsEnabled() bool {
+	if k.Enabled == nil {
+		return true
+	}
+	return *k.Enabled
 }
 
 type MiddlewareConfig struct {
@@ -230,6 +254,7 @@ func normalizeProfileDefinition(name string, def ProfileDefinition) ProfileDefin
 	def.Middlewares = expandMiddlewareConfigs(def.Middlewares)
 	def.ExitPlans.normalize()
 	def.Derivatives.normalize()
+	def.KlineWindows.normalize()
 	return def
 }
 
@@ -373,7 +398,15 @@ func (p ProfileDefinition) AgentEnabled() bool {
 }
 
 func (p ProfileDefinition) DerivativesEnabled() bool {
+	return p.Derivatives.Enabled && (p.Derivatives.IncludeOI || p.Derivatives.IncludeFunding || p.Derivatives.IncludeFearGreed)
+}
+
+func (p ProfileDefinition) DerivativesMetricsEnabled() bool {
 	return p.Derivatives.Enabled && (p.Derivatives.IncludeOI || p.Derivatives.IncludeFunding)
+}
+
+func (p ProfileDefinition) KlineWindowsEnabled() bool {
+	return p.KlineWindows.IsEnabled()
 }
 
 func cloneSnapshot(src ProfileSnapshot) ProfileSnapshot {

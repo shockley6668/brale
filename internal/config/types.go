@@ -148,9 +148,11 @@ type MultiAgentConfig struct {
 	IndicatorProvider string `toml:"indicator_provider"`
 	PatternProvider   string `toml:"pattern_provider"`
 	TrendProvider     string `toml:"trend_provider"`
+	MechanicsProvider string `toml:"mechanics_provider"`
 	IndicatorTemplate string `toml:"indicator_template"`
 	PatternTemplate   string `toml:"pattern_template"`
 	TrendTemplate     string `toml:"trend_template"`
+	MechanicsTemplate string `toml:"mechanics_template"`
 	MaxBlocks         int    `toml:"max_blocks"`
 }
 

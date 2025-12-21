@@ -108,6 +108,13 @@ func (b *AppBuilder) Build(ctx context.Context) (*App, error) {
 	updater := marketStack.Updater
 	warmupSummary := marketStack.WarmupSummary
 	metricsSvc := marketStack.Metrics
+	var fearGreedSvc *market.FearGreedService
+	if profiles.fearGreedEnabled {
+		fearGreedSvc = market.NewFearGreedService()
+		logger.Infof("✓ Fear & Greed 数据服务已启用")
+	} else {
+		logger.Infof("✓ Fear & Greed 数据服务未启用（profile 未请求）")
+	}
 
 	providers, finalDisabled, visionReady, err := b.modelProvidersFn(ctx, cfg.AI, cfg.MCP.TimeoutSeconds)
 	if err != nil {
@@ -126,6 +133,8 @@ func (b *AppBuilder) Build(ctx context.Context) (*App, error) {
 		FinalDisabled:      finalDisabled,
 		LogEachModel:       cfg.AI.LogEachModel,
 		Metrics:            metricsSvc,
+		Sentiment:          marketStack.Sentiment,
+		FearGreed:          fearGreedSvc,
 		TimeoutSeconds:     cfg.MCP.TimeoutSeconds,
 	})
 
@@ -164,6 +173,7 @@ func (b *AppBuilder) Build(ctx context.Context) (*App, error) {
 		Config:          cfg,
 		KlineStore:      ks,
 		Updater:         updater,
+		Metrics:         metricsSvc,
 		Engine:          engine,
 		Telegram:        tgClient,
 		DecisionLogs:    decArtifacts.store,
@@ -224,6 +234,7 @@ type profileSetup struct {
 	intervals         []string
 	lookbacks         map[string]int
 	derivativeSymbols []string
+	fearGreedEnabled  bool
 	summary           string
 }
 
@@ -236,6 +247,13 @@ func (b *AppBuilder) loadProfileSetup(cfg *brcfg.Config) (profileSetup, error) {
 		return profileSetup{}, fmt.Errorf("加载 profile 配置失败: %w", err)
 	}
 	snapshot := profileLoader.Snapshot()
+	fearGreedEnabled := false
+	for _, def := range snapshot.Profiles {
+		if def.Derivatives.Enabled && def.Derivatives.IncludeFearGreed {
+			fearGreedEnabled = true
+			break
+		}
+	}
 	syms, intervals, lookbacks, derivativeSymbols, err := collectProfileUniverse(snapshot, cfg.Kline.MaxCached)
 	if err != nil {
 		return profileSetup{}, err
@@ -247,6 +265,7 @@ func (b *AppBuilder) loadProfileSetup(cfg *brcfg.Config) (profileSetup, error) {
 		intervals:         intervals,
 		lookbacks:         lookbacks,
 		derivativeSymbols: derivativeSymbols,
+		fearGreedEnabled:  fearGreedEnabled,
 		summary:           formatProfileSummary(syms, intervals),
 	}, nil
 }

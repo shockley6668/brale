@@ -14,6 +14,12 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+// MarketMechanicsAgent execution rules:
+// 1) Consume only the derivatives block (OI/Funding/Fear&Greed).
+// 2) Do not inject derivatives into the main decision prompt (Scheme B).
+// 3) Use cached derivatives data; do not force-refresh APIs per decision cycle.
+// 4) Compute a fingerprint from derivatives snapshots and call LLM only when it changes.
+// 5) Evaluate once per symbol per cycle; reuse previous output when unchanged.
 type agentStageConfig struct {
 	name       string
 	tplName    string
@@ -30,10 +36,20 @@ func (e *DecisionEngine) runMultiAgents(ctx context.Context, input Context) []Ag
 	if len(ctxs) == 0 {
 		return nil
 	}
+	hasMechanics := false
+	for _, ac := range ctxs {
+		if dir, ok := lookupDirective(ac.Symbol, input.Directives); ok && dir.allowDerivatives() {
+			hasMechanics = true
+			break
+		}
+	}
 	stages := []agentStageConfig{
 		{name: agentStageIndicator, tplName: cfg.IndicatorTemplate, providerID: cfg.IndicatorProvider, builder: buildIndicatorAgentPrompt},
 		{name: agentStagePattern, tplName: cfg.PatternTemplate, providerID: cfg.PatternProvider, builder: buildPatternAgentPrompt},
 		{name: agentStageTrend, tplName: cfg.TrendTemplate, providerID: cfg.TrendProvider, builder: buildTrendAgentPrompt},
+	}
+	if hasMechanics {
+		stages = append(stages, agentStageConfig{name: agentStageMechanics, tplName: cfg.MechanicsTemplate, providerID: cfg.MechanicsProvider})
 	}
 	results := make([]AgentInsight, len(stages))
 	groupCtx := ctx
@@ -44,7 +60,11 @@ func (e *DecisionEngine) runMultiAgents(ctx context.Context, input Context) []Ag
 	for i, stage := range stages {
 		i, stage := i, stage
 		eg.Go(func() error {
-			results[i] = e.executeAgentStage(egCtx, stage, ctxs, cfg)
+			if stage.name == agentStageMechanics {
+				results[i] = e.executeAgentStage(egCtx, stage, ctxs, cfg, input)
+				return nil
+			}
+			results[i] = e.executeAgentStage(egCtx, stage, ctxs, cfg, Context{})
 			return nil
 		})
 	}
@@ -61,14 +81,31 @@ func (e *DecisionEngine) runMultiAgents(ctx context.Context, input Context) []Ag
 	return out
 }
 
-func (e *DecisionEngine) executeAgentStage(ctx context.Context, stage agentStageConfig, ctxs []AnalysisContext, cfg brcfg.MultiAgentConfig) AgentInsight {
+func (e *DecisionEngine) executeAgentStage(ctx context.Context, stage agentStageConfig, ctxs []AnalysisContext, cfg brcfg.MultiAgentConfig, fullCtx Context) AgentInsight {
 	tpl := strings.TrimSpace(e.loadTemplate(stage.tplName))
 	if tpl == "" {
 		return AgentInsight{}
 	}
-	user := strings.TrimSpace(stage.builder(ctxs, cfg))
-	ins := AgentInsight{Stage: stage.name, System: tpl, User: user}
-	if user == "" {
+	var latestUpdate time.Time
+	fingerprint := ""
+	var user string
+	if stage.name == agentStageMechanics {
+		user, latestUpdate, fingerprint = e.buildMechanicsAgentPrompt(ctx, ctxs, fullCtx)
+		user = strings.TrimSpace(user)
+	} else {
+		user = strings.TrimSpace(stage.builder(ctxs, cfg))
+	}
+	ins := AgentInsight{Stage: stage.name, System: tpl, User: user, Fingerprint: fingerprint}
+	if stage.name != agentStageMechanics && user == "" {
+		ins.Error = "输入为空"
+		ins.Warned = e.emitAgentWarning(stage.name, stage.providerID, ins.Error)
+		return ins
+	}
+	if stage.name == agentStageMechanics && fingerprint == "" {
+		ins.Output = "衍生品数据尚未更新或获取失败，跳过本次分析。"
+		return ins
+	}
+	if stage.name == agentStageMechanics && user == "" && fingerprint != "" {
 		ins.Error = "输入为空"
 		ins.Warned = e.emitAgentWarning(stage.name, stage.providerID, ins.Error)
 		return ins
@@ -85,7 +122,21 @@ func (e *DecisionEngine) executeAgentStage(ctx context.Context, stage agentStage
 		return ins
 	}
 	ins.ProviderID = provider.ID()
-	if prev := e.lookupPreviousAgentOutput(ctx, ctxs, stage.name, ins.ProviderID); prev.Output != "" {
+	prev := e.lookupPreviousAgentOutput(ctx, ctxs, stage.name, ins.ProviderID)
+	if stage.name == agentStageMechanics && prev.Output != "" {
+		if prev.Fingerprint != "" && fingerprint == prev.Fingerprint {
+			ins.Output = prev.Output
+			return ins
+		}
+		if prev.Fingerprint == "" && !latestUpdate.IsZero() && prev.Timestamp > 0 {
+			prevTS := time.UnixMilli(prev.Timestamp)
+			if !latestUpdate.After(prevTS) {
+				ins.Output = prev.Output
+				return ins
+			}
+		}
+	}
+	if prev.Output != "" {
 		user = appendPreviousAgentOutput(user, stage.name, ins.ProviderID, prev)
 		ins.User = user
 	}
@@ -250,6 +301,17 @@ func (e *DecisionEngine) emitAgentWarning(stage, providerID, reason string) bool
 	return true
 }
 
+func (e *DecisionEngine) buildMechanicsAgentPrompt(ctx context.Context, ctxs []AnalysisContext, fullCtx Context) (string, time.Time, string) {
+	if e == nil || len(ctxs) == 0 {
+		return "", time.Time{}, ""
+	}
+	pb, ok := e.PromptBuilder.(*DefaultPromptBuilder)
+	if !ok || pb == nil {
+		return "", time.Time{}, ""
+	}
+	return pb.buildDerivativesSection(ctx, ctxs, fullCtx.Directives)
+}
+
 func describeAgentPurpose(stage string) string {
 	switch stage {
 	case agentStageIndicator:
@@ -258,6 +320,8 @@ func describeAgentPurpose(stage string) string {
 		return "形态叙事"
 	case agentStageTrend:
 		return "趋势/支撑阻力分析"
+	case agentStageMechanics:
+		return "市场力学/衍生品环境"
 	default:
 		return "通用分析"
 	}

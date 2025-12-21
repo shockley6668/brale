@@ -4,11 +4,13 @@ type ProfileDirective struct {
 	DerivativesEnabled bool
 	IncludeOI          bool
 	IncludeFunding     bool
+	IncludeFearGreed   bool
 	MultiAgentEnabled  bool
+	IncludeKlines      bool
 }
 
 func (d ProfileDirective) allowDerivatives() bool {
-	return d.DerivativesEnabled && (d.IncludeOI || d.IncludeFunding)
+	return d.DerivativesEnabled && (d.IncludeOI || d.IncludeFunding || d.IncludeFearGreed)
 }
 
 type Decision struct {

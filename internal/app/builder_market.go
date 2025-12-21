@@ -22,6 +22,7 @@ type MarketStack struct {
 	Store         market.KlineStore
 	Updater       *market.WSUpdater
 	Metrics       *market.MetricsService
+	Sentiment     *market.SentimentService
 	WarmupSummary string
 }
 
@@ -55,12 +56,17 @@ func buildMarketStack(ctx context.Context, cfg *brcfg.Config, symbols []string, 
 	} else {
 		logger.Infof("✓ MetricsService 初始化成功")
 	}
+	var sentimentSvc *market.SentimentService
+	if metricsSvc != nil {
+		sentimentSvc = market.NewSentimentService(kstore, src, metricsSvc)
+	}
 
 	success = true
 	return &MarketStack{
 		Store:         kstore,
 		Updater:       updater,
 		Metrics:       metricsSvc,
+		Sentiment:     sentimentSvc,
 		WarmupSummary: warmupSummary,
 	}, nil
 }
@@ -150,7 +156,7 @@ func collectTargets(def cfgloader.ProfileDefinition, symbolSet, derivativeSet ma
 			return fmt.Errorf("targets 包含空 symbol")
 		}
 		symbolSet[symbol] = struct{}{}
-		if def.DerivativesEnabled() {
+		if def.DerivativesMetricsEnabled() {
 			derivativeSet[symbol] = struct{}{}
 		}
 	}

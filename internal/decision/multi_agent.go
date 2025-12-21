@@ -10,19 +10,21 @@ import (
 )
 
 type AgentInsight struct {
-	Stage      string `json:"stage"`
-	ProviderID string `json:"provider_id"`
-	Output     string `json:"output"`
-	Error      string `json:"error,omitempty"`
-	Warned     bool   `json:"warned,omitempty"`
-	System     string `json:"system,omitempty"`
-	User       string `json:"user,omitempty"`
+	Stage       string `json:"stage"`
+	ProviderID  string `json:"provider_id"`
+	Output      string `json:"output"`
+	Error       string `json:"error,omitempty"`
+	Warned      bool   `json:"warned,omitempty"`
+	System      string `json:"system,omitempty"`
+	User        string `json:"user,omitempty"`
+	Fingerprint string `json:"fingerprint,omitempty"`
 }
 
 const (
 	agentStageIndicator = "indicator"
 	agentStagePattern   = "pattern"
 	agentStageTrend     = "trend"
+	agentStageMechanics = "mechanics"
 )
 
 func agentBlockLimit(cfg brcfg.MultiAgentConfig) int {
@@ -157,6 +159,8 @@ func formatAgentStageTitle(stage string) string {
 		return "Pattern Agent"
 	case agentStageTrend:
 		return "Trend Agent"
+	case agentStageMechanics:
+		return "Market Mechanics Agent"
 	default:
 		stage = strings.TrimSpace(stage)
 		if stage == "" {

@@ -23,6 +23,19 @@ type OpenInterestPoint struct {
 	Timestamp            int64   `json:"timestamp"`
 }
 
+type LongShortRatioPoint struct {
+	Timestamp int64
+	Ratio     float64
+	Long      float64
+	Short     float64
+}
+
+type LongShortRatioProvider interface {
+	TopPositionRatio(ctx context.Context, symbol, period string, limit int) ([]LongShortRatioPoint, error)
+	TopAccountRatio(ctx context.Context, symbol, period string, limit int) ([]LongShortRatioPoint, error)
+	GlobalAccountRatio(ctx context.Context, symbol, period string, limit int) ([]LongShortRatioPoint, error)
+}
+
 type SubscribeOptions struct {
 	BatchSize    int
 	Buffer       int

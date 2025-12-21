@@ -71,6 +71,9 @@ func (a *AIConfig) validate() error {
 		if strings.TrimSpace(ma.TrendTemplate) == "" {
 			return fmt.Errorf("ai.multi_agent.trend_template cannot be empty")
 		}
+		if strings.TrimSpace(ma.MechanicsTemplate) == "" {
+			return fmt.Errorf("ai.multi_agent.mechanics_template cannot be empty")
+		}
 		if ma.MaxBlocks < 0 {
 			return fmt.Errorf("ai.multi_agent.max_blocks must be >= 0")
 		}

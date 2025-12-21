@@ -326,6 +326,7 @@ func (m *MultiAgentConfig) applyDefaults(keys keySet) {
 		stringFieldDefault("ai.multi_agent.indicator_template", &m.IndicatorTemplate, "agent_indicator"),
 		stringFieldDefault("ai.multi_agent.pattern_template", &m.PatternTemplate, "agent_pattern"),
 		stringFieldDefault("ai.multi_agent.trend_template", &m.TrendTemplate, "agent_trend"),
+		stringFieldDefault("ai.multi_agent.mechanics_template", &m.MechanicsTemplate, "agent_mechanics"),
 	)
 	if strings.TrimSpace(m.IndicatorProvider) == "" {
 		m.IndicatorProvider = "deepseek"
@@ -335,6 +336,12 @@ func (m *MultiAgentConfig) applyDefaults(keys keySet) {
 	}
 	if strings.TrimSpace(m.TrendProvider) == "" {
 		m.TrendProvider = "vanchin"
+	}
+	if strings.TrimSpace(m.MechanicsProvider) == "" {
+		m.MechanicsProvider = m.PatternProvider
+		if strings.TrimSpace(m.MechanicsProvider) == "" {
+			m.MechanicsProvider = "qwen"
+		}
 	}
 }
 

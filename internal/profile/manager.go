@@ -25,6 +25,7 @@ type Runtime struct {
 	IndicatorBars        int
 	Derivatives          loader.DerivativesConfig
 	AgentEnabled         bool
+	KlineWindowsEnabled  bool
 }
 
 type Manager struct {
@@ -108,6 +109,7 @@ func (m *Manager) rebuild(snapshot loader.ProfileSnapshot) {
 			IndicatorBars:        estimateIndicatorBars(def),
 			Derivatives:          def.Derivatives,
 			AgentEnabled:         def.AgentEnabled(),
+			KlineWindowsEnabled:  def.KlineWindowsEnabled(),
 		}
 		newProfiles[name] = rt
 		if def.Default {
