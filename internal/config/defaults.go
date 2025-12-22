@@ -105,6 +105,10 @@ const (
 	// 默认: 5
 	// 重置: advanced.plan_refresh_interval_seconds
 	defaultAdvancedPlanRefresh = 5
+	// 高级配置：可视化渲染并发上限
+	// 默认: 1
+	// 重置: advanced.visual_render_concurrency
+	defaultAdvancedVisualRender = 1
 
 	// 交易模式 (static/dynamic)
 	// 默认: "static"
@@ -229,6 +233,11 @@ func (a *AdvancedConfig) applyDefaults(keys keySet) {
 			key:   "advanced.plan_refresh_interval_seconds",
 			need:  func() bool { return a.PlanRefreshIntervalSeconds <= 0 },
 			apply: func() { a.PlanRefreshIntervalSeconds = defaultAdvancedPlanRefresh },
+		},
+		fieldDefault{
+			key:   "advanced.visual_render_concurrency",
+			need:  func() bool { return a.VisualRenderConcurrency <= 0 },
+			apply: func() { a.VisualRenderConcurrency = defaultAdvancedVisualRender },
 		},
 	)
 }

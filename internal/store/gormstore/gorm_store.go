@@ -304,6 +304,43 @@ func (s *GormStore) InsertStrategyChangeLog(ctx context.Context, rec StrategyCha
 	return s.db.WithContext(ctx).Create(&model).Error
 }
 
+func (s *GormStore) ListStrategyChangeLogs(ctx context.Context, tradeID int, limit int) ([]StrategyChangeLogRecord, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("gorm store 未初始化")
+	}
+	if tradeID <= 0 {
+		return nil, fmt.Errorf("trade_id 必填")
+	}
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	var models []strategyChangeLogModel
+	if err := s.db.WithContext(ctx).
+		Where("trade_id = ?", tradeID).
+		Order("created_at DESC").
+		Limit(limit).
+		Find(&models).Error; err != nil {
+		return nil, err
+	}
+	out := make([]StrategyChangeLogRecord, 0, len(models))
+	for _, m := range models {
+		out = append(out, StrategyChangeLogRecord{
+			TradeID:         m.TradeID,
+			InstanceID:      m.InstanceID,
+			PlanID:          strings.TrimSpace(m.PlanID),
+			PlanComponent:   strings.TrimSpace(m.PlanComponent),
+			ChangedField:    strings.TrimSpace(m.ChangedField),
+			OldValue:        strings.TrimSpace(m.OldValue),
+			NewValue:        strings.TrimSpace(m.NewValue),
+			TriggerSource:   strings.TrimSpace(m.TriggerSource),
+			Reason:          strings.TrimSpace(m.Reason),
+			DecisionTraceID: strings.TrimSpace(m.DecisionTraceID),
+			CreatedAt:       time.Unix(m.CreatedAtUnix, 0),
+		})
+	}
+	return out, nil
+}
+
 func (s *GormStore) UpsertLiveOrder(ctx context.Context, rec LiveOrderRecord) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("gorm store 未初始化")

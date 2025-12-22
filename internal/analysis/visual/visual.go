@@ -74,6 +74,11 @@ const (
 )
 
 func RenderComposite(input CompositeInput) (ImageResult, error) {
+	release, err := acquireRenderSlot(input.Context)
+	if err != nil {
+		return ImageResult{}, err
+	}
+	defer release()
 	if err := EnsureHeadlessAvailable(input.Context); err != nil {
 		return ImageResult{}, err
 	}
@@ -108,7 +113,44 @@ func RenderComposite(input CompositeInput) (ImageResult, error) {
 var (
 	headlessOnce sync.Once
 	headlessErr  error
+
+	renderLimiterMu   sync.RWMutex
+	renderLimiter     chan struct{}
+	renderLimiterSize int
 )
+
+// SetRenderConcurrency limits the number of concurrent render jobs.
+// Values <= 0 fallback to 1.
+func SetRenderConcurrency(limit int) {
+	if limit <= 0 {
+		limit = 1
+	}
+	renderLimiterMu.Lock()
+	defer renderLimiterMu.Unlock()
+	if renderLimiterSize == limit && renderLimiter != nil {
+		return
+	}
+	renderLimiterSize = limit
+	renderLimiter = make(chan struct{}, limit)
+}
+
+func acquireRenderSlot(ctx context.Context) (func(), error) {
+	renderLimiterMu.RLock()
+	ch := renderLimiter
+	renderLimiterMu.RUnlock()
+	if ch == nil {
+		return func() {}, nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	select {
+	case ch <- struct{}{}:
+		return func() { <-ch }, nil
+	case <-ctx.Done():
+		return func() {}, ctx.Err()
+	}
+}
 
 func EnsureHeadlessAvailable(ctx context.Context) error {
 	headlessOnce.Do(func() {

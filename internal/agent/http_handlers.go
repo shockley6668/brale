@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"brale/internal/agent/interfaces"
+	"brale/internal/gateway/database"
 	"brale/internal/gateway/exchange"
 	"brale/internal/logger"
 	livehttp "brale/internal/transport/http/live"
@@ -130,4 +131,29 @@ func (s *LiveService) AdjustPlan(ctx context.Context, req livehttp.PlanAdjustReq
 		Source:    "Manual/Admin",
 	}
 	return s.planScheduler.AdjustPlan(ctx, spec)
+}
+
+func (s *LiveService) ListStrategyInstances(ctx context.Context, tradeID int) ([]database.StrategyInstanceRecord, error) {
+	if s == nil {
+		return nil, fmt.Errorf("live service 未初始化")
+	}
+	if s.strategyStore != nil {
+		return s.strategyStore.ListStrategyInstances(ctx, tradeID)
+	}
+	return nil, fmt.Errorf("strategy store 未启用")
+}
+
+func (s *LiveService) ListStrategyChangeLogs(ctx context.Context, tradeID int, limit int) ([]database.StrategyChangeLogRecord, error) {
+	if s == nil {
+		return nil, fmt.Errorf("live service 未初始化")
+	}
+	if s.strategyStore != nil {
+		type changeGetter interface {
+			ListStrategyChangeLogs(context.Context, int, int) ([]database.StrategyChangeLogRecord, error)
+		}
+		if getter, ok := s.strategyStore.(changeGetter); ok {
+			return getter.ListStrategyChangeLogs(ctx, tradeID, limit)
+		}
+	}
+	return nil, fmt.Errorf("strategy log store 未启用")
 }

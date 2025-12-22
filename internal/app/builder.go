@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"brale/internal/agent"
+	"brale/internal/analysis/visual"
 	brcfg "brale/internal/config"
 	cfgloader "brale/internal/config/loader"
 	"brale/internal/decision"
@@ -84,6 +85,7 @@ func (b *AppBuilder) Build(ctx context.Context) (*App, error) {
 	}
 	cfg := b.cfg
 	logger.SetLevel(cfg.App.LogLevel)
+	visual.SetRenderConcurrency(cfg.Advanced.VisualRenderConcurrency)
 
 	profiles, err := b.loadProfileSetup(cfg)
 	if err != nil {

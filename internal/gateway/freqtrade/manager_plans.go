@@ -75,6 +75,13 @@ func (m *Manager) CacheDecision(key string, d decision.Decision) string {
 	return key
 }
 
+func (m *Manager) ListStrategyInstances(ctx context.Context, tradeID int) ([]database.StrategyInstanceRecord, error) {
+	if m == nil || m.posStore == nil {
+		return nil, fmt.Errorf("posStore not initialized")
+	}
+	return m.posStore.ListStrategyInstances(ctx, tradeID)
+}
+
 func (m *Manager) SyncStrategyPlans(ctx context.Context, tradeID int, plans any) error {
 	if m.trader == nil {
 		return nil

@@ -369,13 +369,20 @@ func (r *Router) handleFreqtradePositionDetail(c *gin.Context) {
 			return
 		}
 		var plans []database.StrategyInstanceRecord
-		if r.Logs != nil {
-			if recs, err := r.Logs.ListStrategyInstances(c.Request.Context(), tradeID); err == nil {
-				plans = recs
-			} else {
-				logger.Warnf("[api] freqtrade position detail load plans failed ip=%s trade_id=%d err=%v", c.ClientIP(), tradeID, err)
-			}
+		planGetter, ok := r.FreqtradeHandler.(interface {
+			ListStrategyInstances(context.Context, int) ([]database.StrategyInstanceRecord, error)
+		})
+		if !ok {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "strategy store unavailable"})
+			return
 		}
+		recs, err := planGetter.ListStrategyInstances(c.Request.Context(), tradeID)
+		if err != nil {
+			logger.Warnf("[api] freqtrade position detail load plans failed ip=%s trade_id=%d err=%v", c.ClientIP(), tradeID, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		plans = recs
 		logger.Debugf("[api] freqtrade position detail ip=%s trade_id=%d symbol=%s side=%s",
 			c.ClientIP(), tradeID, strings.ToUpper(strings.TrimSpace(pos.Symbol)), strings.ToLower(strings.TrimSpace(pos.Side)))
 		c.JSON(http.StatusOK, gin.H{
@@ -410,13 +417,20 @@ func (r *Router) handleFreqtradePositionDetail(c *gin.Context) {
 		return
 	}
 	var plans []database.StrategyInstanceRecord
-	if r.Logs != nil {
-		if recs, err := r.Logs.ListStrategyInstances(c.Request.Context(), tradeID); err == nil {
-			plans = recs
-		} else {
-			logger.Warnf("[api] freqtrade position detail load plans failed ip=%s trade_id=%d err=%v", c.ClientIP(), tradeID, err)
-		}
+	planGetter, ok := r.FreqtradeHandler.(interface {
+		ListStrategyInstances(context.Context, int) ([]database.StrategyInstanceRecord, error)
+	})
+	if !ok {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "strategy store unavailable"})
+		return
 	}
+	recs, err := planGetter.ListStrategyInstances(c.Request.Context(), tradeID)
+	if err != nil {
+		logger.Warnf("[api] freqtrade position detail load plans failed ip=%s trade_id=%d err=%v", c.ClientIP(), tradeID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	plans = recs
 	logger.Debugf("[api] freqtrade position detail ip=%s trade_id=%d symbol=%s side=%s",
 		c.ClientIP(), tradeID, strings.ToUpper(strings.TrimSpace(target.Symbol)), strings.ToLower(strings.TrimSpace(target.Side)))
 	c.JSON(http.StatusOK, gin.H{
@@ -487,10 +501,6 @@ func (r *Router) handleLiveLogs(c *gin.Context) {
 }
 
 func (r *Router) handlePlanChanges(c *gin.Context) {
-	if r.Logs == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "strategy log store unavailable"})
-		return
-	}
 	tradeID, _ := strconv.Atoi(strings.TrimSpace(c.Query("trade_id")))
 	if tradeID <= 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "trade_id 必填"})
@@ -498,7 +508,15 @@ func (r *Router) handlePlanChanges(c *gin.Context) {
 	}
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
 	ctx := c.Request.Context()
-	logs, err := r.Logs.ListStrategyChangeLogs(ctx, tradeID, limit)
+	type changeGetter interface {
+		ListStrategyChangeLogs(context.Context, int, int) ([]database.StrategyChangeLogRecord, error)
+	}
+	getter, ok := r.FreqtradeHandler.(changeGetter)
+	if !ok {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "strategy log store unavailable"})
+		return
+	}
+	logs, err := getter.ListStrategyChangeLogs(ctx, tradeID, limit)
 	if err != nil {
 		logger.Errorf("[api] plan changes failed trade=%d err=%v", tradeID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -508,17 +526,21 @@ func (r *Router) handlePlanChanges(c *gin.Context) {
 }
 
 func (r *Router) handlePlanInstances(c *gin.Context) {
-	if r.Logs == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "strategy log store unavailable"})
-		return
-	}
 	tradeID, _ := strconv.Atoi(strings.TrimSpace(c.Query("trade_id")))
 	if tradeID <= 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "trade_id 必填"})
 		return
 	}
 	ctx := c.Request.Context()
-	recs, err := r.Logs.ListStrategyInstances(ctx, tradeID)
+	type planGetter interface {
+		ListStrategyInstances(context.Context, int) ([]database.StrategyInstanceRecord, error)
+	}
+	getter, ok := r.FreqtradeHandler.(planGetter)
+	if !ok {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "strategy store unavailable"})
+		return
+	}
+	recs, err := getter.ListStrategyInstances(ctx, tradeID)
 	if err != nil {
 		logger.Errorf("[api] plan instances failed trade=%d err=%v", tradeID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

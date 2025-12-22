@@ -58,6 +58,7 @@ type AdvancedConfig struct {
 	OpenCooldownSeconds        int     `toml:"open_cooldown_seconds"`
 	MaxOpensPerCycle           int     `toml:"max_opens_per_cycle"`
 	PlanRefreshIntervalSeconds int     `toml:"plan_refresh_interval_seconds"`
+	VisualRenderConcurrency    int     `toml:"visual_render_concurrency"`
 }
 
 type TradingConfig struct {
