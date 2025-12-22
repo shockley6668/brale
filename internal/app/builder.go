@@ -122,6 +122,10 @@ func (b *AppBuilder) Build(ctx context.Context) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
+	providerRoles, stageProviders, err := resolvePersonas(cfg.AI, providers)
+	if err != nil {
+		return nil, err
+	}
 
 	engine := buildDecisionEngine(engineConfig{
 		Providers:          providers,
@@ -132,6 +136,8 @@ func (b *AppBuilder) Build(ctx context.Context) (*App, error) {
 		HorizonName:        cfg.AI.ActiveHorizon,
 		MultiAgent:         cfg.AI.MultiAgent,
 		ProviderPreference: cfg.AI.ProviderPreference,
+		ProviderRoles:      providerRoles,
+		StageProviders:     stageProviders,
 		FinalDisabled:      finalDisabled,
 		LogEachModel:       cfg.AI.LogEachModel,
 		Metrics:            metricsSvc,

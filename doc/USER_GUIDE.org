@@ -151,13 +151,22 @@ This is the master control room of the system.
 - *~market~*: Select market source (default ~binance~). If you are in mainland China, you may need to configure ~proxy~.
 - *~ai~*:
   - ~provider_preference~: Set the default order of AI models to use. If multiple models are available, the system will select based on this order.
-  - ~multi_agent~: *Multi-Agent Role Configuration* (Core Feature).
-    Brale breaks down market analysis into multiple specialized fields, and you can assign the most suitable AI model to each field:
-    - ~indicator_provider~: *Indicator Analyst*. Responsible for interpreting mathematical indicators like RSI, MACD. Recommended to use a model with strong logical reasoning (e.g., DeepSeek).
-    - ~pattern_provider~: *Pattern Analyst*. Responsible for identifying candlestick patterns (e.g., Double Bottom, Head and Shoulders).
-    - ~trend_provider~: *Trend Analyst*. Responsible for judging large-cycle direction and filtering noise.
-    - ~mechanics_provider~: *Market Mechanics Analyst*. Responsible for analyzing derivatives data like Funding Rate, Open Interest.
-    /Hint: The provider name here must correspond to the ~id~ defined in your ~models~ list./
+  - ~personas~ + ~multi_agent~: *Multi-Agent role config* (core).
+    - ~personas~ unify “which model plays which role and which Agent stages it binds”. Fields:
+      - ~model~: reference to ~ai.models~ id.
+      - ~role~: indicator / mechanics / structure_pattern (three choices).
+      - ~stages~: which Agent stages this model handles: indicator / pattern / trend / mechanics (can be multiple).
+      Example:
+      #+begin_example
+      ai:
+        personas:
+          indicator_bot: { model: "chatgpt",  role: "indicator",         stages: ["indicator"] }
+          mechanics_bot: { model: "qwen",     role: "mechanics",         stages: ["mechanics"] }
+          structure_bot: { model: "gemini",   role: "structure_pattern", stages: ["pattern","trend"] }
+      #+end_example
+    - ~multi_agent~ keeps only templates/switches (~indicator_template/pattern_template/trend_template/mechanics_template~); *_provider fields are removed.
+    - Tip: when multi_agent is enabled, personas must cover indicator/pattern/trend/mechanics stages (one model per stage).
+    - system prompt files by role (example): structure → ~system-structure.txt~, mechanics → ~system-mechanics.txt~, indicator → ~system-indicator.txt~ (configure via ~system_by_model~ using model ids).
   - ~freqtrade~: *Execution Interface Configuration*.
     Used to connect Brale with the Freqtrade instance responsible for order placement:
     - ~username~ & ~password~: *Freqtrade API Credentials*. Must match the ~api_server~ settings in ~freqtrade-config.json~.
@@ -191,7 +200,14 @@ Key configuration items explained:
   - ~ema_trend~ / ~rsi_extreme~ / ~macd_trend~: Computes specific mathematical indicators for AI reference.
 - *~prompts~*: *Prompt Command Center*.
   - ~user~: Injects the user prompt for the final request, used to define specific rules (e.g., long only).
-  - ~system_by_model~: Customize system prompts for different models.
+  - ~system_by_model~: Customize system prompts for different models; ids must match ~personas.model~. Example:
+    #+begin_example
+    prompts:
+      system_by_model:
+        qwen:    "system-structure.txt"   # qwen -> structure/pattern LLM
+        gemini:  "system-mechanics.txt"   # gemini -> derivatives/mechanics LLM
+        chatgpt: "system-indicator.txt"   # chatgpt -> indicator/momentum LLM
+    #+end_example
 - *~derivatives~*: *Derivatives Data*. Includes Open Interest (OI), Funding Rate, and Fear & Greed Index.
 - *~exit_plans~*: *Exit Strategy Constraints*. Limits the types of TP/SL plans the AI must generate.
 
@@ -229,10 +245,43 @@ Key configuration items explained:
 
 Here's a rough breakdown of what it does in the background (chronologically):
 
+#+begin_src mermaid
+flowchart LR
+    subgraph Data["Market & Derivatives Collection"]
+        Mkt[Candles/Price] -->|warmup+WS| Cache[Market cache]
+        Deriv[OI/Funding/F&G/CVD/Sentiment] --> Poll[MetricsService polling]
+    end
+
+    subgraph Snap["Snapshot & Compression"]
+        Cache --> IndSnap[Indicator JSON<br/>EMA/RSI/MACD/ATR compressed]
+        Cache --> TrendSnap[Trend JSON<br/>structure_points/recent_candles]
+        Cache --> PatternSnap[Pattern/Visual text]
+        Poll --> MechSnap[Mechanics list<br/>OI/Funding/CVD/F&G]
+    end
+
+    subgraph MA["Multi-Agent (per personas)"]
+        IndSnap --> A1[Indicator Agent<br/>model=indicator_bot]
+        TrendSnap & PatternSnap --> A2[Pattern/Trend Agent<br/>model=structure_bot]
+        MechSnap --> A3[Mechanics Agent<br/>model=mechanics_bot]
+    end
+
+    subgraph Providers["Provider stage (input isolation)"]
+        A1 --> L3[LLM-3 Indicator/Momentum<br/>system-indicator.txt<br/>sees only Indicator]
+        A2 --> L1[LLM-1 Structure/Pattern<br/>system-structure.txt<br/>sees only Trend+Pattern]
+        A3 --> L2[LLM-2 Derivatives/Mechanics<br/>system-mechanics.txt<br/>sees only Mechanics]
+    end
+
+    subgraph Final["Decision & Execution"]
+        L1 & L2 & L3 --> FM[Fund Manager Prompt<br/>account/positions/derivatives/candles/history/constraints]
+        FM --> Meta[Meta aggregation]
+        Meta --> Exec[Freqtrade execution/plan]
+    end
+#+end_src
+
 1. *Data Collection & Caching*
    - MarketDataService is the general market data collection layer. Upon startup, it pre-heats candlesticks according to the profile's analysis cycle (minimum 30 minutes), then continuously writes incrementally to memory cache via WebSocket for Agents needing market windows (e.g., indicator/pattern/trend); when ~kline_windows.enabled~ in ~profiles.yaml~ is off, candlestick windows won't be stuffed into the User Prompt.
    - MechanicsAgent only reuses the same time alignment rhythm to refresh derivatives; it's not its exclusive service.
-   - Before each decision round, indicator_provider / pattern_provider / trend_provider generate inputs based on the latest cache (if configured enabled and data available), without re-fetching from the exchange.
+   - Before each decision round, models bound via personas generate inputs for each Agent stage (indicator/pattern/trend/mechanics) using the latest cache, without re-fetching from the exchange.
    - Derivatives (OI, Funding, Fear & Greed, CVD) are polled in the background by MetricsService; MarketMechanicsAgent LLM call is triggered only when values change compared to the last time.
    - Real-time price is fetched on-demand (latest tick) during the Provider stage, written into User Prompt along with account funds.
 
@@ -246,6 +295,7 @@ Here's a rough breakdown of what it does in the background (chronologically):
    - *Pattern/Narrative Agent Data Link*: Runs ~pattern.Analyze~ with clipped candlesticks, determines bias via linear regression slope, and detects patterns like Double Top/Bottom, Converging Triangle, Volatility Contraction, etc., combined into short sentences; extra TrendSummary (regression offset percentage) and optional visual description ("Visual" note given by renderComposite) are put into prompt together, carrying no raw candlesticks or indicator values, ensuring extremely short input.
    - *Market Mechanics Agent Data Link*: MetricsService polls cached OI/Funding (backtracking according to configured timeframe, with historical comparison), Fear & Greed index (max 5 history), CVD (accumulated based on taker buy/sell volume in candlesticks, outputting Value/Momentum/Normalized, divergence and top/bottom reversal markers), Sentiment score (0-100 rough sentiment). Data is assembled into a text list with de-duplication fingerprint (SHA256); reuses last LLM output when fingerprint is unchanged to avoid repeated calls; returns "skip" hint when no data.
    - *User Prompt Assembly & Compression*: Each Agent's user prompt is the aforementioned compressed snapshot block (Indicator JSON, Trend JSON code block, Pattern/Visual text, Mechanics list). When Multi-Agent outputs enter the final Fund Manager prompt, they are placed in the ~## Multi-Agent Collaboration~ area, displayed in the order of Indicator→Pattern→Trend→Mechanics, with 3600 character truncation for single Agent output. Candlestick windows, account, positions, previous reasoning, etc. are also truncated in length and values (candlesticks optionally only stuff recent 4 bars) to control tokens, driving LLM reasoning with minimal information.
+   - *Provider Input Isolation*: personas' role (indicator / mechanics / structure_pattern) decides which Agent outputs each provider can see, preventing cross-contamination. System prompt files align with roles (e.g., structure→~system-structure.txt~, mechanics→~system-mechanics.txt~, indicator→~system-indicator.txt~, configured via ~system_by_model~ using model ids).
 
 3. *Decision Synthesis*
    - *Fund Manager LLM* as the final decision maker receives a *User Prompt* containing comprehensive information to reason with. This Prompt includes:

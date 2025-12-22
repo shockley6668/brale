@@ -26,6 +26,8 @@ type engineConfig struct {
 	HorizonName        string
 	MultiAgent         brcfg.MultiAgentConfig
 	ProviderPreference []string
+	ProviderRoles      map[string]string
+	StageProviders     map[string]string
 	FinalDisabled      map[string]bool
 	LogEachModel       bool
 	Metrics            *market.MetricsService
@@ -157,6 +159,8 @@ func buildDecisionEngine(cfg engineConfig) *decision.DecisionEngine {
 		HorizonName:        cfg.HorizonName,
 		MultiAgent:         cfg.MultiAgent,
 		ProviderPreference: append([]string(nil), cfg.ProviderPreference...),
+		ProviderRoles:      cfg.ProviderRoles,
+		StageProviders:     cfg.StageProviders,
 		FinalDisabled:      finalDisabled,
 		Parallel:           true,
 		LogEachModel:       cfg.LogEachModel,
@@ -164,6 +168,48 @@ func buildDecisionEngine(cfg engineConfig) *decision.DecisionEngine {
 	}
 	engine.PromptBuilder = decision.NewDefaultPromptBuilder(cfg.PromptMgr, cfg.Store, cfg.Metrics, cfg.Sentiment, cfg.FearGreed, cfg.Intervals, cfg.LogEachModel)
 	return engine
+}
+
+func resolvePersonas(cfg brcfg.AIConfig, providers []provider.ModelProvider) (map[string]string, map[string]string, error) {
+	if len(cfg.Personas) == 0 {
+		return nil, nil, fmt.Errorf("ai.personas is required")
+	}
+	providerSet := make(map[string]struct{}, len(providers))
+	for _, p := range providers {
+		if p != nil && p.Enabled() {
+			providerSet[p.ID()] = struct{}{}
+		}
+	}
+	providerRoles := make(map[string]string, len(cfg.Personas))
+	stageProviders := make(map[string]string, 4)
+	for name, persona := range cfg.Personas {
+		modelID := strings.TrimSpace(persona.Model)
+		role := brcfg.NormalizePersonaRole(persona.Role)
+		if modelID == "" || role == "" {
+			return nil, nil, fmt.Errorf("invalid persona %s: model=%q role=%q", name, persona.Model, persona.Role)
+		}
+		if _, ok := providerSet[modelID]; !ok {
+			return nil, nil, fmt.Errorf("persona %s references disabled or missing model %s", name, modelID)
+		}
+		providerRoles[modelID] = role
+		for _, st := range persona.Stages {
+			stage := brcfg.NormalizePersonaStage(st)
+			if stage == "" {
+				return nil, nil, fmt.Errorf("persona %s has invalid stage %q", name, st)
+			}
+			if prev, exists := stageProviders[stage]; exists && prev != modelID {
+				return nil, nil, fmt.Errorf("stage %s bound to multiple models (%s vs %s)", stage, prev, modelID)
+			}
+			stageProviders[stage] = modelID
+		}
+	}
+	required := []string{"indicator", "pattern", "trend", "mechanics"}
+	for _, st := range required {
+		if _, ok := stageProviders[st]; !ok && cfg.MultiAgent.Enabled {
+			return nil, nil, fmt.Errorf("persona missing stage binding: %s", st)
+		}
+	}
+	return providerRoles, stageProviders, nil
 }
 
 func applyDefaultMultiAgentBlocks(cfg *brcfg.Config, symbolCount, intervalCount int) {

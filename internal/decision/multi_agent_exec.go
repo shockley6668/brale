@@ -44,12 +44,12 @@ func (e *DecisionEngine) runMultiAgents(ctx context.Context, input Context) []Ag
 		}
 	}
 	stages := []agentStageConfig{
-		{name: agentStageIndicator, tplName: cfg.IndicatorTemplate, providerID: cfg.IndicatorProvider, builder: buildIndicatorAgentPrompt},
-		{name: agentStagePattern, tplName: cfg.PatternTemplate, providerID: cfg.PatternProvider, builder: buildPatternAgentPrompt},
-		{name: agentStageTrend, tplName: cfg.TrendTemplate, providerID: cfg.TrendProvider, builder: buildTrendAgentPrompt},
+		{name: agentStageIndicator, tplName: cfg.IndicatorTemplate, providerID: e.StageProviders[agentStageIndicator], builder: buildIndicatorAgentPrompt},
+		{name: agentStagePattern, tplName: cfg.PatternTemplate, providerID: e.StageProviders[agentStagePattern], builder: buildPatternAgentPrompt},
+		{name: agentStageTrend, tplName: cfg.TrendTemplate, providerID: e.StageProviders[agentStageTrend], builder: buildTrendAgentPrompt},
 	}
 	if hasMechanics {
-		stages = append(stages, agentStageConfig{name: agentStageMechanics, tplName: cfg.MechanicsTemplate, providerID: cfg.MechanicsProvider})
+		stages = append(stages, agentStageConfig{name: agentStageMechanics, tplName: cfg.MechanicsTemplate, providerID: e.StageProviders[agentStageMechanics]})
 	}
 	results := make([]AgentInsight, len(stages))
 	groupCtx := ctx
@@ -111,6 +111,11 @@ func (e *DecisionEngine) executeAgentStage(ctx context.Context, stage agentStage
 		return ins
 	}
 	preferred := strings.TrimSpace(stage.providerID)
+	if preferred == "" {
+		ins.Error = "未配置模型"
+		ins.Warned = true
+		return ins
+	}
 	provider := e.findAgentProvider(preferred)
 	if provider == nil {
 		if preferred != "" {
@@ -292,9 +297,7 @@ func containsBannedWords(text string) bool {
 	lower := strings.ToLower(text)
 	banned := []string{
 		"bullish", "bearish",
-		"买入", "卖出", "开多", "开空",
 		"止损", "止盈",
-		"entry", "exit", "long", "short",
 		"一定", "必然", "确定",
 	}
 	for _, w := range banned {

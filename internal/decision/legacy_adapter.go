@@ -40,6 +40,8 @@ type DecisionEngine struct {
 	MultiAgent  brcfg.MultiAgentConfig
 
 	ProviderPreference []string
+	ProviderRoles      map[string]string
+	StageProviders     map[string]string
 	FinalDisabled      map[string]bool
 
 	ExitPlans *exitplan.Registry
@@ -155,10 +157,35 @@ func (e *DecisionEngine) decideSingle(ctx context.Context, input Context, applyD
 	if prevProviders := e.lookupPreviousProviderOutputs(ctx, input); len(prevProviders) > 0 {
 		input.PreviousProviderOutputs = prevProviders
 	}
-	baseSys, usr, visionPayloads, err := e.PromptBuilder.Build(ctx, input, insights)
-	if err != nil {
-		return DecisionResult{}, err
+	type providerPrompt struct {
+		system string
+		user   string
+		images []provider.ImagePayload
 	}
+	promptsByProvider := make(map[string]providerPrompt, len(e.Providers))
+	var fallbackPrompt providerPrompt
+	for idx, p := range e.Providers {
+		allowedStages := allowedAgentStagesForProvider(p.ID(), input.ProfilePrompts, input.Candidates, e.ProviderRoles)
+		filteredInsights := filterAgentInsightsByStage(insights, allowedStages)
+		sys, usr, imgs, err := e.PromptBuilder.Build(ctx, input, filteredInsights)
+		if err != nil {
+			return DecisionResult{}, err
+		}
+		entry := providerPrompt{system: sys, user: usr, images: imgs}
+		promptsByProvider[p.ID()] = entry
+		if idx == 0 || fallbackPrompt.user == "" {
+			fallbackPrompt = entry
+		}
+	}
+	if fallbackPrompt.user == "" {
+		sys, usr, imgs, err := e.PromptBuilder.Build(ctx, input, insights)
+		if err != nil {
+			return DecisionResult{}, err
+		}
+		fallbackPrompt = providerPrompt{system: sys, user: usr, images: imgs}
+	}
+	baseSys := fallbackPrompt.system
+	baseUsr := fallbackPrompt.user
 
 	if applyDelay {
 		time.Sleep(5 * time.Second)
@@ -169,7 +196,19 @@ func (e *DecisionEngine) decideSingle(ctx context.Context, input Context, applyD
 		if err != nil {
 			return ModelOutput{ProviderID: p.ID(), Err: err}
 		}
-		return e.callProvider(c, p, sys, usr, visionPayloads)
+		prompt := fallbackPrompt
+		if entry, ok := promptsByProvider[p.ID()]; ok {
+			if entry.user != "" {
+				prompt.user = entry.user
+			}
+			if len(entry.images) > 0 {
+				prompt.images = entry.images
+			}
+			if entry.system != "" {
+				prompt.system = entry.system
+			}
+		}
+		return e.callProvider(c, p, sys, prompt.user, prompt.images)
 	})
 
 	if len(e.ProviderPreference) > 0 {
@@ -201,7 +240,7 @@ func (e *DecisionEngine) decideSingle(ctx context.Context, input Context, applyD
 		e.Observer.AfterDecide(ctx, DecisionTrace{
 			TraceID:       traceID,
 			SystemPrompt:  bestSys,
-			UserPrompt:    usr,
+			UserPrompt:    baseUsr,
 			Outputs:       cloneOutputs(outs),
 			Best:          best,
 			Candidates:    CloneSlice(input.Candidates),

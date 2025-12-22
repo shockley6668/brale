@@ -48,13 +48,14 @@ type PromptBundle struct {
 // ProfilePromptSpec configures how prompts are built for each symbol/profile.
 // SystemPromptsByModel allows different system prompts per LLM provider.
 type ProfilePromptSpec struct {
-	Profile              string
-	ContextTag           string
-	PromptRef            string
-	SystemPromptsByModel map[string]string
-	UserPrompt           string
-	ExitConstraints      string
-	Example              string
+	Profile                 string
+	ContextTag              string
+	PromptRef               string
+	SystemPromptsByModel    map[string]string
+	SystemPromptRefsByModel map[string]string
+	UserPrompt              string
+	ExitConstraints         string
+	Example                 string
 }
 
 // HardFlags carries system-computed guard rails (LLM 不得改判).

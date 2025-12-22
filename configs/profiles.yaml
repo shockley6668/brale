@@ -61,9 +61,9 @@ profiles:
       # - system_by_model：按模型 id 指定 system prompt（同一个 profile 可对不同模型给不同 system prompt）
       user: "lauk.txt"                     # User prompt：细化 exit_plan 约束
       system_by_model:
-        gemini: "system-eth1.txt"         # key 为 ai.models[].id
-        qwen: "system-eth2.txt"
-        chatgpt: "system-eth3.txt"
+        qwen: "system-structure.txt"     # key 为 ai.models[].id
+        gemini: "system-mechanics.txt"
+        chatgpt: "system-indicator.txt"
     derivatives:                             # 衍生品注入开关（关闭则完全跳过 OI/Funding 抓取）
       enabled: true                          # 是否启用衍生品数据（OI/Funding）
       include_oi: true                       # 是否注入 Open Interest

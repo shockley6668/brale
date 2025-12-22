@@ -41,12 +41,12 @@ ai:
   active_horizon: "profiles"      # 仅作标签；真实配置在 profiles.yaml
   decision_log_path: "/data/live/decisions.db" # 决策日志 DB 路径（仅用于决策记录）
   provider_preference: ["deepseek", "qwen"] # 默认模型选择顺序（第一个启用且可用的会被选中）
+  personas:                        # Persona 统一声明模型角色与绑定的 Agent 阶段
+    indicator_bot: { model: "chatgpt", role: "indicator", stages: ["indicator"] }
+    mechanics_bot: { model: "gemini", role: "mechanics", stages: ["mechanics"] }
+    structure_bot: { model: "qwen", role: "structure_pattern", stages: ["pattern", "trend"] }
   multi_agent:
     enabled: true                 # 是否启用 Multi-Agent（指标/形态/趋势分工）
-    indicator_provider: "deepseek" # 指标 Agent 使用的模型 id
-    pattern_provider: "qwen"       # 形态 Agent 使用的模型 id
-    trend_provider: "vanchin"      # 趋势 Agent 使用的模型 id
-    mechanics_provider: "qwen"     # 衍生品/市场力学 Agent 使用的模型 id
     indicator_template: "agent_indicator" # prompts/ 下的模板名（不含 .txt）
     pattern_template: "agent_pattern"
     trend_template: "agent_trend"

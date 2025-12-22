@@ -146,19 +146,21 @@ func (s *StandardStrategy) buildProfilePrompts(candidates []string, activeProfil
 		promptText := rt.UserPrompt
 		promptRef := strings.TrimSpace(rt.Definition.Prompts.User)
 		sysPrompts := decision.CloneStringMap(rt.SystemPromptsByModel)
+		sysPromptRefs := decision.CloneStringMap(rt.Definition.Prompts.SystemByModel)
 		exitText, example := s.buildProfileExitDirective(rt, sym)
 
 		if len(sysPrompts) == 0 && strings.TrimSpace(promptText) == "" && strings.TrimSpace(exitText) == "" && strings.TrimSpace(example) == "" {
 			continue
 		}
 		prompts[sym] = decision.ProfilePromptSpec{
-			Profile:              rt.Definition.Name,
-			ContextTag:           rt.Definition.ContextTag,
-			PromptRef:            promptRef,
-			SystemPromptsByModel: sysPrompts,
-			UserPrompt:           promptText,
-			ExitConstraints:      exitText,
-			Example:              example,
+			Profile:                 rt.Definition.Name,
+			ContextTag:              rt.Definition.ContextTag,
+			PromptRef:               promptRef,
+			SystemPromptsByModel:    sysPrompts,
+			SystemPromptRefsByModel: sysPromptRefs,
+			UserPrompt:              promptText,
+			ExitConstraints:         exitText,
+			Example:                 example,
 		}
 	}
 	return prompts

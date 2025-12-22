@@ -151,13 +151,20 @@ Brale 的强大在于灵活配置。你需要关注三个主要文件。
 - *~market~*：选择行情源（默认 ~binance~）。如果你在中国大陆，可能需要配置 ~proxy~。
 - *~ai~*：
   - ~provider_preference~：设置默认使用的 AI 模型顺序。如果有多个可用模型，系统将按此顺序选择。
-  - ~multi_agent~：*多特工分工配置*（核心功能）。
-    Brale 将市场分析拆解为多个专业领域，你可以为每个领域指定最擅长的 AI 模型：
-    - ~indicator_provider~：*指标分析师*。负责解读 RSI, MACD 等数学指标。建议使用逻辑推理能力强的模型（如 DeepSeek）。
-    - ~pattern_provider~：*形态分析师*。负责识别 K 线形态（如双底、头肩顶）。
-    - ~trend_provider~：*趋势分析师*。负责判断大周期方向，过滤噪音。
-    - ~mechanics_provider~：*市场力学分析师*。负责分析资金费率、持仓量等衍生品数据。
-    /提示：这里的 provider 名称必须对应你在 ~models~ 列表中定义的 ~id~。/
+  - ~personas~ + ~multi_agent~：*多特工分工配置*（核心功能）。
+    - ~personas~：统一定义“哪个模型扮演哪个角色，以及绑定哪些 Agent 阶段”。字段：
+      - ~model~：引用 ~ai.models~ 中的 ~id~。
+      - ~role~：indicator / mechanics / structure_pattern（三选一，对应 指标 / 衍生品 / 结构+形态）。
+      - ~stages~：绑定的 Agent 阶段列表（可多选）：indicator / pattern / trend / mechanics。
+      示例：#+begin_example
+      ai:
+        personas:
+          indicator_bot: { model: "chatgpt",  role: "indicator",         stages: ["indicator"] }
+          mechanics_bot: { model: "qwen",     role: "mechanics",         stages: ["mechanics"] }
+          structure_bot: { model: "gemini",   role: "structure_pattern", stages: ["pattern","trend"] }
+      #+end_example
+    - 提示：personas 的角色与阶段要覆盖 indicator/pattern/trend/mechanics 四个阶段，否则 multi_agent 开启时会校验失败。
+    - system prompt 对应文件（示例）：structure → ~system-structure.txt~；mechanics → ~system-mechanics.txt~；indicator → ~system-indicator.txt~（在 ~system_by_model~ 里按模型 id 配置）。
   - ~freqtrade~：*执行端对接配置*。
     用于连接 Brale 与负责下单的 Freqtrade 实例：
     - ~username~ & ~password~：*Freqtrade API 的访问凭证*。必须与 ~freqtrade-config.json~ 中的 ~api_server~ 设置一致。
@@ -191,7 +198,23 @@ Brale 的强大在于灵活配置。你需要关注三个主要文件。
   - ~ema_trend~ / ~rsi_extreme~ / ~macd_trend~：计算具体的数学指标并供 AI 参考。
 - *~prompts~*：*提示词指挥部*。
   - ~user~：注入最后请求的 user prompt，可用于定义具体规则（如：只做多）。
-  - ~system_by_model~：为不同模型定制系统提示词。
+  - ~system_by_model~：为不同模型定制系统提示词；需与 ~personas~ 中的模型 id 对应。示例：
+    #+begin_example
+    prompts:
+      system_by_model:
+        qwen:    "system-structure.txt"   # qwen 模型→结构/形态决策 system prompt
+        gemini:  "system-mechanics.txt"   # gemini 模型→衍生品/市场力学 system prompt
+        chatgpt: "system-indicator.txt"   # chatgpt 模型→指标/动量 system prompt
+    #+end_example
+    配合 personas（例）：
+    #+begin_example
+    ai:
+      personas:
+        structure_bot: { model: "qwen",   role: "structure_pattern", stages: ["pattern","trend"] }
+        mechanics_bot: { model: "gemini", role: "mechanics",         stages: ["mechanics"] }
+        indicator_bot: { model: "chatgpt",role: "indicator",         stages: ["indicator"] }
+    #+end_example
+    这样可确保：结构/形态→qwen→system-structure.txt；衍生品→gemini→system-mechanics.txt；指标→chatgpt→system-indicator.txt。
 - *~derivatives~*：*衍生品数据*。包含持仓量 (OI)、资金费率和恐慌贪婪指数。
 - *~exit_plans~*：*退出策略约束*。限定 AI 必须生成的止盈止损计划类型。
 
@@ -229,10 +252,43 @@ Brale 的强大在于灵活配置。你需要关注三个主要文件。
 
 让你知道它在后台做了什么（按时间先后粗略拆解）：
 
+#+begin_src mermaid
+flowchart LR
+    subgraph Data["行情 & 衍生品采集"]
+        Mkt[K线/价格] -->|预热+WS| Cache[行情缓存]
+        Deriv["OI/Funding/F&G/CVD/情绪"] --> Poll[MetricsService 轮询]
+    end
+
+    subgraph Snap["数据压缩与快照"]
+        Cache --> IndSnap["Indicator JSON<br/>EMA/RSI/MACD/ATR 压缩"]
+        Cache --> TrendSnap["Trend JSON<br/>structure_points/recent_candles 等"]
+        Cache --> PatternSnap["Pattern/Visual 文本"]
+        Poll --> MechSnap["Mechanics 列表<br/>OI/Funding/CVD/F&G"]
+    end
+
+    subgraph MA["Multi-Agent 执行（按 personas 绑定模型）"]
+        IndSnap --> A1["Indicator Agent<br/>model=indicator_bot"]
+        TrendSnap & PatternSnap --> A2["Pattern/Trend Agent<br/>model=structure_bot"]
+        MechSnap --> A3["Mechanics Agent<br/>model=mechanics_bot"]
+    end
+
+    subgraph Providers["Provider 阶段（输入隔离）"]
+        A1 --> L3["LLM-3 指标/动量<br/>system-indicator.txt<br/>只看 Indicator"]
+        A2 --> L1["LLM-1 结构/形态<br/>system-structure.txt<br/>只看 Trend+Pattern"]
+        A3 --> L2["LLM-2 衍生品/力学<br/>system-mechanics.txt<br/>只看 Mechanics"]
+    end
+
+    subgraph Final["决策与执行"]
+        L1 & L2 & L3 --> FM["Fund Manager Prompt<br/>账户/持仓/衍生品/K线/历史推理/约束"]
+        FM --> Meta["聚合仲裁 (meta)"]
+        Meta --> Exec["Freqtrade 执行/计划"]
+    end
+#+end_src
+
 1. *数据收集与缓存*
    - MarketDataService 是通用行情采集层，启动时按 profile 的分析周期（最小 30 分钟）批量预热 K 线，之后通过 WebSocket 持续增量写入内存缓存，供需要行情窗口的 Agent 使用（如 indicator/pattern/trend）；~profiles.yaml~ 的 ~kline_windows.enabled~ 关闭时，不会把 K 线窗口塞进 User Prompt。
    - MechanicsAgent 只复用同样的时间对齐节奏来刷新衍生品，不是它的专属服务。
-   - 每轮决策前，indicator_provider / pattern_provider / trend_provider 基于最新缓存生成输入（若配置启用且数据可用），不再向交易所重复拉取。
+   - 每轮决策前，按 personas 绑定的模型为各 Agent 阶段生成输入（indicator/pattern/trend/mechanics），使用最新缓存，不再向交易所重复拉取。
    - Derivatives（OI、Funding、恐慌与贪婪、CVD）由 MetricsService 后台轮询；只有数值相较上次有变化时才会触发 MarketMechanicsAgent 的 LLM 调用。
    - 实时价格在 Provider 阶段按需拉取最新 tick，连同账户资金一起写入 User Prompt。
 
@@ -246,6 +302,7 @@ Brale 的强大在于灵活配置。你需要关注三个主要文件。
    - *形态/叙事 Agent 数据链路*：用剪裁后的 K 线运行 ~pattern.Analyze~，做线性回归斜率判定 bias，并检测双顶/双底、收敛三角、波动收缩等模式，组合成短句；额外的 TrendSummary（回归偏移百分比）与可选的可视化描述（renderComposite 给出的 “Visual” note）一起放入 prompt，不携带原始 K 线或指标数值，保证输入极短。
    - *市场力学 Agent 数据链路*：MetricsService 轮询缓存 OI/Funding（按配置的时间框架回溯，带历史对比）、Fear & Greed 指数（最多 5 条历史）、CVD（基于 K 线中的 taker 买卖量累加，输出 Value/Momentum/Normalized、背离和顶底翻转标记）、Sentiment 评分（0-100 的粗情绪）。数据会被组装成文本列表并做去重指纹（SHA256），指纹未变时复用上一轮 LLM 输出，避免重复调用；无数据时直接返回“跳过”提示。
    - *User Prompt 拼装与压缩*：每个 Agent 的 user prompt 都是上述压缩后的快照块（Indicator JSON、Trend JSON 代码块、Pattern/Visual 文本、Mechanics 列表）。多 Agent 输出进入最终 Fund Manager prompt 时，会放在 ~## Multi-Agent 协作~ 区域，按 Indicator→Pattern→Trend→Mechanics 顺序展示，并对单个 Agent 输出做 3600 字符截断。K 线窗口、账户、持仓、上一轮推理等其他部分也会做长度截断和数值取舍（K 线可选仅塞最近 4 根）以控制 token，用最小信息量驱动 LLM 推理。
+   - *Provider 阶段输入隔离*：通过 personas 绑定的 role（indicator / mechanics / structure_pattern）决定每个 provider 能看到的 Agent 输出，禁止串味；system prompt 文件与角色对应（示例：structure→system-structure.txt，mechanics→system-mechanics.txt，indicator→system-indicator.txt，通过 ~system_by_model~ 按模型 id 配置）。
 
 3. *决策合成 (Decision Synthesis)*
    - *Fund Manager LLM* 作为最终决策者，会收到一份包含全方位信息的 *User Prompt*，以此进行推理。这份 Prompt 包含了：

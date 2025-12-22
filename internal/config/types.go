@@ -94,18 +94,19 @@ type FreqtradeConfig struct {
 }
 
 type AIConfig struct {
-	Aggregation           string                 `toml:"aggregation"`
-	LogEachModel          bool                   `toml:"log_each_model"`
-	Weights               map[string]float64     `toml:"weights"`
-	ProviderPreference    []string               `toml:"provider_preference"`
-	DecisionOffsetSeconds int                    `toml:"decision_offset_seconds"`
-	DecisionLogPath       string                 `toml:"decision_log_path"`
-	ActiveHorizon         string                 `toml:"active_horizon"`
-	ProviderPresets       map[string]ModelPreset `toml:"provider_presets"`
-	Models                []AIModelConfig        `toml:"models"`
-	MultiAgent            MultiAgentConfig       `toml:"multi_agent"`
-	ProfilesPath          string                 `toml:"profiles_path"`
-	ExitPlanPath          string                 `toml:"exit_strategies_path"`
+	Aggregation           string                   `toml:"aggregation"`
+	LogEachModel          bool                     `toml:"log_each_model"`
+	Weights               map[string]float64       `toml:"weights"`
+	ProviderPreference    []string                 `toml:"provider_preference"`
+	Personas              map[string]PersonaConfig `toml:"personas"`
+	DecisionOffsetSeconds int                      `toml:"decision_offset_seconds"`
+	DecisionLogPath       string                   `toml:"decision_log_path"`
+	ActiveHorizon         string                   `toml:"active_horizon"`
+	ProviderPresets       map[string]ModelPreset   `toml:"provider_presets"`
+	Models                []AIModelConfig          `toml:"models"`
+	MultiAgent            MultiAgentConfig         `toml:"multi_agent"`
+	ProfilesPath          string                   `toml:"profiles_path"`
+	ExitPlanPath          string                   `toml:"exit_strategies_path"`
 }
 
 type ModelPreset struct {
@@ -144,12 +145,14 @@ type ResolvedModelConfig struct {
 	ExpectJSON     bool
 }
 
+type PersonaConfig struct {
+	Model  string   `toml:"model"`
+	Role   string   `toml:"role"`
+	Stages []string `toml:"stages"`
+}
+
 type MultiAgentConfig struct {
 	Enabled           bool   `toml:"enabled"`
-	IndicatorProvider string `toml:"indicator_provider"`
-	PatternProvider   string `toml:"pattern_provider"`
-	TrendProvider     string `toml:"trend_provider"`
-	MechanicsProvider string `toml:"mechanics_provider"`
 	IndicatorTemplate string `toml:"indicator_template"`
 	PatternTemplate   string `toml:"pattern_template"`
 	TrendTemplate     string `toml:"trend_template"`

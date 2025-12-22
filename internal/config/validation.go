@@ -38,7 +38,9 @@ func (a *AIConfig) validate() error {
 	if len(models) == 0 {
 		return fmt.Errorf("ai.models requires at least one model")
 	}
+	modelSet := make(map[string]struct{}, len(models))
 	for _, m := range models {
+		modelSet[m.ID] = struct{}{}
 		if strings.TrimSpace(m.Model) == "" {
 			return fmt.Errorf("ai.models contains entry without model (id=%s)", m.ID)
 		}
@@ -50,15 +52,14 @@ func (a *AIConfig) validate() error {
 		}
 	}
 	if len(a.ProviderPreference) > 0 {
-		modelSet := make(map[string]struct{}, len(models))
-		for _, m := range models {
-			modelSet[m.ID] = struct{}{}
-		}
 		for _, id := range a.ProviderPreference {
 			if _, ok := modelSet[id]; !ok {
 				return fmt.Errorf("ai.provider_preference contains unconfigured model id: %s", id)
 			}
 		}
+	}
+	if err := a.validatePersonas(modelSet); err != nil {
+		return err
 	}
 	if a.MultiAgent.Enabled {
 		ma := a.MultiAgent
@@ -76,6 +77,63 @@ func (a *AIConfig) validate() error {
 		}
 		if ma.MaxBlocks < 0 {
 			return fmt.Errorf("ai.multi_agent.max_blocks must be >= 0")
+		}
+		if err := validatePersonaStageCoverage(a.Personas); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (a *AIConfig) validatePersonas(modelSet map[string]struct{}) error {
+	if len(a.Personas) == 0 {
+		return fmt.Errorf("ai.personas must define at least one persona")
+	}
+	stageOwners := make(map[string]string)
+	for name, p := range a.Personas {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return fmt.Errorf("ai.personas contains empty persona name")
+		}
+		modelID := strings.TrimSpace(p.Model)
+		if modelID == "" {
+			return fmt.Errorf("ai.personas[%s] missing model", name)
+		}
+		if _, ok := modelSet[modelID]; !ok {
+			return fmt.Errorf("ai.personas[%s] references unknown model id: %s", name, modelID)
+		}
+		role := NormalizePersonaRole(p.Role)
+		if role == "" {
+			return fmt.Errorf("ai.personas[%s] has invalid role: %s (allowed: indicator/mechanics/structure_pattern)", name, p.Role)
+		}
+		for _, st := range p.Stages {
+			stage := NormalizePersonaStage(st)
+			if stage == "" {
+				return fmt.Errorf("ai.personas[%s] has invalid stage: %s (allowed: indicator/pattern/trend/mechanics)", name, st)
+			}
+			if prev, exists := stageOwners[stage]; exists && prev != modelID {
+				return fmt.Errorf("stage %s bound to multiple personas (%s and %s)", stage, prev, modelID)
+			}
+			stageOwners[stage] = modelID
+		}
+	}
+	return nil
+}
+
+func validatePersonaStageCoverage(personas map[string]PersonaConfig) error {
+	required := []string{"indicator", "pattern", "trend", "mechanics"}
+	owner := make(map[string]bool)
+	for _, p := range personas {
+		for _, st := range p.Stages {
+			stage := NormalizePersonaStage(st)
+			if stage != "" {
+				owner[stage] = true
+			}
+		}
+	}
+	for _, st := range required {
+		if !owner[st] {
+			return fmt.Errorf("ai.personas must bind stage '%s' (multi_agent.enabled=true)", st)
 		}
 	}
 	return nil

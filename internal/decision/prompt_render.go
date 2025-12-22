@@ -162,7 +162,7 @@ func (b *DefaultPromptBuilder) renderFearGreedSection(acc *derivativesAccumulato
 		if errMsg == "" {
 			errMsg = "无数据"
 		}
-		acc.sb.WriteString(fmt.Sprintf("  - 获取失败 (%s)\n", errMsg))
+		fmt.Fprintf(acc.sb, "  - 获取失败 (%s)\n", errMsg)
 		acc.updateLatest(fgData.LastUpdate)
 		return
 	}
@@ -184,11 +184,11 @@ func (b *DefaultPromptBuilder) renderFearGreedSection(acc *derivativesAccumulato
 		if !point.Timestamp.IsZero() {
 			ts = point.Timestamp.UTC().Format(time.RFC3339)
 		}
-		acc.sb.WriteString(fmt.Sprintf("  - %s: %d (%s)\n", ts, point.Value, point.Classification))
+		fmt.Fprintf(acc.sb, "  - %s: %d (%s)\n", ts, point.Value, point.Classification)
 		fmt.Fprintf(&fp, "%d:%s|", point.Value, point.Classification)
 	}
 	if fgData.TimeUntilUpdate > 0 {
-		acc.sb.WriteString(fmt.Sprintf("  - 距下次更新=%s\n", fgData.TimeUntilUpdate.Round(time.Second)))
+		fmt.Fprintf(acc.sb, "  - 距下次更新=%s\n", fgData.TimeUntilUpdate.Round(time.Second))
 	}
 	acc.updateLatest(fgData.LastUpdate)
 	acc.addAge("fear_greed", fgData.LastUpdate)
@@ -201,7 +201,7 @@ func (b *DefaultPromptBuilder) renderMetricsSection(acc *derivativesAccumulator,
 		if errMsg == "" {
 			errMsg = "无数据"
 		}
-		acc.sb.WriteString(fmt.Sprintf("  - 衍生品数据获取失败 (%s)\n", errMsg))
+		fmt.Fprintf(acc.sb, "  - 衍生品数据获取失败 (%s)\n", errMsg)
 		acc.updateLatest(metricsData.LastUpdate)
 		return
 	}
@@ -213,13 +213,13 @@ func (b *DefaultPromptBuilder) renderMetricsSection(acc *derivativesAccumulator,
 	fp.WriteString("sym=")
 	fp.WriteString(sym)
 	if dir.IncludeOI {
-		acc.sb.WriteString(fmt.Sprintf("  - OI.now: %.2f\n", metricsData.OI))
+		fmt.Fprintf(acc.sb, "  - OI.now: %.2f\n", metricsData.OI)
 		fp.WriteString("|oi=")
 		fp.WriteString(formatutil.Float(metricsData.OI, 4))
 		for _, tf := range b.Metrics.GetTargetTimeframes() {
 			if oldOI, ok := metricsData.OIHistory[tf]; ok && oldOI > 0 {
 				changePct := (metricsData.OI - oldOI) / oldOI * 100
-				acc.sb.WriteString(fmt.Sprintf("    - OI.%s: %.2f (%.2f%%)\n", tf, oldOI, changePct))
+				fmt.Fprintf(acc.sb, "    - OI.%s: %.2f (%.2f%%)\n", tf, oldOI, changePct)
 				fp.WriteString("|oi_")
 				fp.WriteString(tf)
 				fp.WriteString("=")
@@ -228,7 +228,7 @@ func (b *DefaultPromptBuilder) renderMetricsSection(acc *derivativesAccumulator,
 					acc.leverageCrowded = true
 				}
 			} else {
-				acc.sb.WriteString(fmt.Sprintf("    - OI.%s: 无数据\n", tf))
+				fmt.Fprintf(acc.sb, "    - OI.%s: 无数据\n", tf)
 				fp.WriteString("|oi_")
 				fp.WriteString(tf)
 				fp.WriteString("=0")
@@ -239,7 +239,7 @@ func (b *DefaultPromptBuilder) renderMetricsSection(acc *derivativesAccumulator,
 		}
 	}
 	if dir.IncludeFunding {
-		acc.sb.WriteString(fmt.Sprintf("  - funding.rate: %.4f%%\n", metricsData.FundingRate*100))
+		fmt.Fprintf(acc.sb, "  - funding.rate: %.4f%%\n", metricsData.FundingRate*100)
 		fp.WriteString("|fund=")
 		fp.WriteString(formatutil.Float(metricsData.FundingRate, 8))
 		if math.Abs(metricsData.FundingRate) >= 0.0001 {
@@ -257,7 +257,7 @@ func (b *DefaultPromptBuilder) renderMetricsSection(acc *derivativesAccumulator,
 }
 
 func (b *DefaultPromptBuilder) renderIntervalDerivatives(acc *derivativesAccumulator, ctx context.Context, sym, iv string, candles []market.Candle) {
-	acc.sb.WriteString(fmt.Sprintf("  - %s:\n", iv))
+	fmt.Fprintf(acc.sb, "  - %s:\n", iv)
 	if len(candles) == 0 {
 		acc.sb.WriteString("    - CVD: 无数据\n")
 		acc.sb.WriteString("    - 情绪评分: 无数据\n")
@@ -276,11 +276,11 @@ func (b *DefaultPromptBuilder) renderIntervalDerivatives(acc *derivativesAccumul
 	fp.WriteString(iv)
 
 	if cvd, ok := market.ComputeCVD(candles); ok {
-		acc.sb.WriteString(fmt.Sprintf("    - cvd.value: %s\n", cvd.Value.StringFixed(2)))
-		acc.sb.WriteString(fmt.Sprintf("      - cvd.mom: %s\n", cvd.Momentum.StringFixed(2)))
-		acc.sb.WriteString(fmt.Sprintf("      - cvd.norm: %s\n", cvd.Normalized.StringFixed(6)))
-		acc.sb.WriteString(fmt.Sprintf("      - cvd.divergence: %s\n", strings.ToLower(cvd.Divergence)))
-		acc.sb.WriteString(fmt.Sprintf("      - cvd.peak_flip: %s\n", strings.ToLower(cvd.PeakFlip)))
+		fmt.Fprintf(acc.sb, "    - cvd.value: %s\n", cvd.Value.StringFixed(2))
+		fmt.Fprintf(acc.sb, "      - cvd.mom: %s\n", cvd.Momentum.StringFixed(2))
+		fmt.Fprintf(acc.sb, "      - cvd.norm: %s\n", cvd.Normalized.StringFixed(6))
+		fmt.Fprintf(acc.sb, "      - cvd.divergence: %s\n", strings.ToLower(cvd.Divergence))
+		fmt.Fprintf(acc.sb, "      - cvd.peak_flip: %s\n", strings.ToLower(cvd.PeakFlip))
 		hasData = true
 		fp.WriteString("|cvd=")
 		fp.WriteString(cvd.Value.StringFixed(2))
@@ -301,7 +301,7 @@ func (b *DefaultPromptBuilder) renderIntervalDerivatives(acc *derivativesAccumul
 
 	if b.Sentiment != nil {
 		if sent, ok := b.Sentiment.Calculate(ctx, sym, iv, candles); ok {
-			acc.sb.WriteString(fmt.Sprintf("    - 情绪评分: %d/100\n", sent.Score))
+			fmt.Fprintf(acc.sb, "    - 情绪评分: %d/100\n", sent.Score)
 			hasData = true
 			fp.WriteString("|sent=")
 			fp.WriteString(fmt.Sprintf("%d", sent.Score))
@@ -315,7 +315,7 @@ func (b *DefaultPromptBuilder) renderIntervalDerivatives(acc *derivativesAccumul
 }
 
 func (b *DefaultPromptBuilder) renderSymbolDerivatives(acc *derivativesAccumulator, ctx context.Context, sym string, dir ProfileDirective, intervals []string) {
-	acc.sb.WriteString(fmt.Sprintf("- %s:\n", sym))
+	fmt.Fprintf(acc.sb, "- %s:\n", sym)
 
 	var metricsData market.DerivativesData
 	metricsOK := false
