@@ -49,6 +49,8 @@ func buildLiveHTTPServer(cfg brcfg.AppConfig, logs *database.DecisionLogStore, f
 		DefaultSymbols:   defaultSymbols,
 		SymbolDetails:    symbolDetails,
 		LogPaths:         logPaths,
+		AuthUsername:     cfg.AuthUsername,
+		AuthPassword:     cfg.AuthPassword,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("初始化 live HTTP 失败: %w", err)

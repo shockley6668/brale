@@ -30,6 +30,8 @@ type ServerConfig struct {
 	DefaultSymbols   []string
 	SymbolDetails    map[string]SymbolDetail
 	LogPaths         map[string]string
+	AuthUsername     string
+	AuthPassword     string
 }
 
 func NewServer(cfg ServerConfig) (*Server, error) {
@@ -46,7 +48,22 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	router := gin.New()
 	router.Use(gin.Recovery(), requestLogger())
 
-	registerAdminRoutes(router, cfg.Logs, cfg.FreqtradeHandler, cfg.DefaultSymbols, cfg.SymbolDetails)
+	authEnabled := cfg.AuthUsername != "" && cfg.AuthPassword != ""
+
+	adminGroup := router.Group("/")
+	apiGroup := router.Group("/api/live")
+
+	if authEnabled {
+		auth := gin.BasicAuth(gin.Accounts{
+			cfg.AuthUsername: cfg.AuthPassword,
+		})
+		adminGroup.Use(auth)
+		apiGroup.Use(auth)
+		logger.Infof("✓ HTTP 认证已启用 (用户: %s)", cfg.AuthUsername)
+	}
+
+	router.SetFuncMap(adminTemplateFuncs)
+	registerAdminRoutesWithGroup(adminGroup, cfg.Logs, cfg.FreqtradeHandler, cfg.DefaultSymbols, cfg.SymbolDetails)
 
 	if err := loadTemplates(router); err != nil {
 		return nil, err
@@ -59,7 +76,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 	liveRouter := NewRouter(cfg.Logs, cfg.FreqtradeHandler, cfg.LogPaths)
-	liveRouter.Register(router.Group("/api/live"))
+	liveRouter.Register(apiGroup)
 
 	return &Server{addr: cfg.Addr, router: router}, nil
 }

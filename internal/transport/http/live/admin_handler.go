@@ -138,7 +138,7 @@ var adminTemplateFuncs = template.FuncMap{
 	},
 }
 
-func registerAdminRoutes(router *gin.Engine, logs *database.DecisionLogStore, freq FreqtradeWebhookHandler, defaultSymbols []string, symbolDetails map[string]SymbolDetail) {
+func registerAdminRoutesWithGroup(group *gin.RouterGroup, logs *database.DecisionLogStore, freq FreqtradeWebhookHandler, defaultSymbols []string, symbolDetails map[string]SymbolDetail) {
 	h := &adminHandler{
 		logs:           logs,
 		freq:           freq,
@@ -146,19 +146,17 @@ func registerAdminRoutes(router *gin.Engine, logs *database.DecisionLogStore, fr
 		symbolDetails:  symbolDetails,
 	}
 
-	router.SetFuncMap(adminTemplateFuncs)
-
-	router.GET("/", func(c *gin.Context) {
+	group.GET("/", func(c *gin.Context) {
 		c.Redirect(http.StatusFound, "/admin/desk")
 	})
-	router.GET("/admin", func(c *gin.Context) {
+	group.GET("/admin", func(c *gin.Context) {
 		c.Redirect(http.StatusFound, "/admin/desk")
 	})
-	router.GET("/admin/", func(c *gin.Context) {
+	group.GET("/admin/", func(c *gin.Context) {
 		c.Redirect(http.StatusFound, "/admin/desk")
 	})
 
-	g := router.Group("/admin")
+	g := group.Group("/admin")
 	{
 		g.GET("/desk", h.renderDesk)
 		g.GET("/book/decisions", h.renderDecisions)

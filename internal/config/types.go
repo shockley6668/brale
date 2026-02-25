@@ -17,12 +17,14 @@ type Config struct {
 }
 
 type AppConfig struct {
-	Env      string `toml:"env"`
-	LogLevel string `toml:"log_level"`
-	HTTPAddr string `toml:"http_addr"`
-	LogPath  string `toml:"log_path"`
-	LLMLog   string `toml:"llm_log_path"`
-	LLMDump  bool   `toml:"llm_dump_payload"`
+	Env          string `toml:"env"`
+	LogLevel     string `toml:"log_level"`
+	HTTPAddr     string `toml:"http_addr"`
+	LogPath      string `toml:"log_path"`
+	LLMLog       string `toml:"llm_log_path"`
+	LLMDump      bool   `toml:"llm_dump_payload"`
+	AuthUsername string `toml:"auth_username"`
+	AuthPassword string `toml:"auth_password"`
 }
 
 type KlineConfig struct {

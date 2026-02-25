@@ -156,6 +156,8 @@ func (a *AppConfig) applyDefaults(keys keySet) {
 		stringFieldDefault("app.http_addr", &a.HTTPAddr, defaultAppHTTPAddr),
 		stringFieldDefault("app.log_path", &a.LogPath, defaultAppLogPath),
 		stringFieldDefault("app.llm_log_path", &a.LLMLog, defaultAppLLMLogPath),
+		stringFieldDefault("app.auth_username", &a.AuthUsername, ""),
+		stringFieldDefault("app.auth_password", &a.AuthPassword, ""),
 	)
 }
 
