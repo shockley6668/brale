@@ -21,11 +21,11 @@ const (
 	// 应用主日志文件路径
 	// 默认: "/data/logs/brale-live.log"
 	// 重置: app.log_path
-	defaultAppLogPath = "/data/logs/brale-live.log"
+	defaultAppLogPath = "./data/logs/brale-live.log"
 	// LLM 交互日志文件路径
 	// 默认: "/data/logs/brale-llm.log"
 	// 重置: app.llm_log_path
-	defaultAppLLMLogPath = "/data/logs/brale-llm.log"
+	defaultAppLLMLogPath = "./data/logs/brale-llm.log"
 
 	// K线数据最大缓存数量
 	// 默认: 300
@@ -49,7 +49,7 @@ const (
 	// AI 决策日志数据库路径
 	// 默认: "/data/live/decisions.db"
 	// 重置: ai.decision_log_path
-	defaultAIDecisionLog = "/data/live/decisions.db"
+	defaultAIDecisionLog = "./data/live/decisions.db"
 	// 决策执行偏移时间（秒），防止整点并发
 	// 默认: 10
 	// 重置: ai.decision_offset_seconds
@@ -83,7 +83,7 @@ const (
 	// Freqtrade 风险数据库路径
 	// 默认: "/data/db/trade_risk.db"
 	// 重置: freqtrade.risk_store_path
-	defaultFreqtradeRiskDB = "/data/db/trade_risk.db"
+	defaultFreqtradeRiskDB = "./data/db/trade_risk.db"
 
 	// 高级配置：最小流动性过滤 (百万 USD)
 	// 默认: 15

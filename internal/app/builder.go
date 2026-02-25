@@ -199,10 +199,7 @@ func (b *AppBuilder) Build(ctx context.Context) (*App, error) {
 		ExitPlanPrompts: exitPromptIndex,
 	})
 
-	var freqHandler livehttp.FreqtradeWebhookHandler
-	if freqManager != nil {
-		freqHandler = liveSvc
-	}
+	var freqHandler livehttp.FreqtradeWebhookHandler = liveSvc
 	liveHTTPServe, err := b.liveHTTPFn(cfg.App, decArtifacts.store, freqHandler, profiles.symbols, convertSymbolDetails(symbolDetails))
 	if err != nil {
 		return nil, err

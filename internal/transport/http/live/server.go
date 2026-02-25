@@ -42,7 +42,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	if cfg.LogPaths == nil {
 		cfg.LogPaths = map[string]string{}
 	}
-	gin.SetMode(gin.ReleaseMode)
+	gin.SetMode(gin.DebugMode)
 	router := gin.New()
 	router.Use(gin.Recovery(), requestLogger())
 

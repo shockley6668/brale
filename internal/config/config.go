@@ -9,7 +9,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-const AIDecisionRunImmediately = false
+const AIDecisionRunImmediately = true
 
 func Load(path string) (*Config, error) {
 	files, err := resolveConfigIncludes(path)

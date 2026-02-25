@@ -9,6 +9,9 @@ import (
 )
 
 func (m *Manager) Positions() []decision.PositionSnapshot {
+	if m == nil {
+		return nil
+	}
 	if m.trader != nil {
 		snap := m.trader.Snapshot()
 		return snapshotDecisionPositions(snap)

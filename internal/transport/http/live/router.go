@@ -37,6 +37,7 @@ func NewRouter(logs *database.DecisionLogStore, handler FreqtradeWebhookHandler,
 }
 
 func (r *Router) Register(group *gin.RouterGroup) {
+	logger.Infof("[api] registering live router routes under group: %s", group.BasePath())
 	if group == nil {
 		return
 	}
@@ -58,6 +59,8 @@ func (r *Router) Register(group *gin.RouterGroup) {
 		group.GET("/freqtrade/events", r.handleFreqtradeEvents)
 		group.POST("/plans/adjust", r.handlePlanAdjust)
 	}
+	group.POST("/trigger-analysis", r.handleTriggerAnalysis)
+	logger.Infof("[api] registered POST /trigger-analysis")
 }
 
 type FreqtradeWebhookHandler interface {
@@ -69,6 +72,7 @@ type FreqtradeWebhookHandler interface {
 	ManualOpenPosition(ctx context.Context, req exchange.ManualOpenRequest) error
 	GetLatestPriceQuote(ctx context.Context, symbol string) (exchange.PriceQuote, error)
 	AdjustPlan(ctx context.Context, req PlanAdjustRequest) error
+	TriggerAnalysis(ctx context.Context) error
 }
 
 type PlanAdjustRequest struct {
@@ -253,6 +257,19 @@ func (r *Router) handleDecisionByID(c *gin.Context) {
 		"trace": trace,
 		"round": round,
 	})
+}
+
+func (r *Router) handleTriggerAnalysis(c *gin.Context) {
+	logger.Infof("[api] handleTriggerAnalysis hit from ip=%s", c.ClientIP())
+	if r.FreqtradeHandler == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "engine not available"})
+		return
+	}
+	if err := r.FreqtradeHandler.TriggerAnalysis(c.Request.Context()); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
 func (r *Router) handleFreqtradeWebhook(c *gin.Context) {

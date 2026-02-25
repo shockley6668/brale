@@ -8,7 +8,7 @@ import (
 )
 
 func (m *Manager) RefreshBalance(ctx context.Context) (exchange.Balance, error) {
-	if m.client == nil {
+	if m == nil || m.client == nil {
 		return exchange.Balance{}, fmt.Errorf("client not initialized")
 	}
 	bal, err := m.client.GetBalance(ctx)
@@ -20,5 +20,8 @@ func (m *Manager) RefreshBalance(ctx context.Context) (exchange.Balance, error) 
 }
 
 func (m *Manager) AccountBalance() exchange.Balance {
+	if m == nil {
+		return exchange.Balance{}
+	}
 	return m.balance
 }

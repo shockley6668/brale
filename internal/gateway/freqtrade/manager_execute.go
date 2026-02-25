@@ -30,7 +30,7 @@ func buildSignalEntryPayload(d decision.Decision, side string, entryPrice float6
 }
 
 func (m *Manager) Execute(ctx context.Context, input decision.DecisionInput) error {
-	if m.trader == nil {
+	if m == nil || m.trader == nil {
 		return fmt.Errorf("trader actor not initialized")
 	}
 	d := input.Decision

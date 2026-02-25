@@ -82,6 +82,14 @@ func NewLiveEngine(p EngineParams) *LiveEngine {
 	}
 }
 
+func (e *LiveEngine) TriggerAnalysis(ctx context.Context) error {
+	symbols := e.resolveCandidates()
+	if len(symbols) == 0 {
+		return fmt.Errorf("no candidates found")
+	}
+	return e.tickSymbols(ctx, symbols)
+}
+
 func (e *LiveEngine) Run(ctx context.Context) error {
 	offset := 10 * time.Second
 	runImmediately := brcfg.AIDecisionRunImmediately

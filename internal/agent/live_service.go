@@ -244,3 +244,10 @@ func (s *LiveService) lookupFearGreedService() *market.FearGreedService {
 	}
 	return pb.FearGreed
 }
+
+func (s *LiveService) TriggerAnalysis(ctx context.Context) error {
+	if s == nil || s.liveEngine == nil {
+		return fmt.Errorf("live service or engine not initialized")
+	}
+	return s.liveEngine.TriggerAnalysis(ctx)
+}

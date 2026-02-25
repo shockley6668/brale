@@ -111,6 +111,9 @@ func (m *Manager) SyncStrategyPlans(ctx context.Context, tradeID int, plans any)
 }
 
 func (m *Manager) SetPlanUpdateHook(hook exchange.PlanUpdateHook) {
+	if m == nil {
+		return
+	}
 	m.planUpdateHook = hook
 }
 

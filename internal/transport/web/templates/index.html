@@ -49,6 +49,7 @@
                     </div>
                     <div class="actions">
                         <button class="pill-btn" @click="refreshCurrent" :disabled="loadingAny">刷新</button>
+                        <button class="pill-btn danger" @click="triggerAnalysis" :disabled="loadingAny">AI即时分析</button>
                         <button class="pill-btn primary" @click="switchView('positions')">快速查看仓位</button>
                     </div>
                 </header>

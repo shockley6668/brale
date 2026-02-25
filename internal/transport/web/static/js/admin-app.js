@@ -2059,6 +2059,19 @@
         }
       };
 
+      const triggerAnalysis = async () => {
+        desk.loading = true;
+        try {
+          await fetchJSON('/api/live/trigger-analysis', { method: 'POST' });
+          showToast('已手动触发 AI 分析', 'info');
+          setTimeout(() => loadDesk(), 2000);
+        } catch (e) {
+          showToast(`手动触发分析失败: ${e.message}`, 'error');
+        } finally {
+          desk.loading = false;
+        }
+      };
+
       const openPlanAdjust = (inst) => {
         if (!inst) return;
         if (inst.planComponent) {
@@ -2968,6 +2981,7 @@
         currentPricePosition,
         loadTradingViewWidget,
         chartLevelChips,
+        triggerAnalysis,
       };
     },
   });

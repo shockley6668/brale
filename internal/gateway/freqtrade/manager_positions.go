@@ -14,7 +14,7 @@ import (
 )
 
 func (m *Manager) ListFreqtradePositions(ctx context.Context, opts exchange.PositionListOptions) (exchange.PositionListResult, error) {
-	if m.posRepo == nil {
+	if m == nil || m.posRepo == nil {
 		return exchange.PositionListResult{}, fmt.Errorf("posRepo not initialized")
 	}
 
@@ -328,7 +328,7 @@ func (m *Manager) RefreshAPIPosition(ctx context.Context, tradeID int) (*exchang
 }
 
 func (m *Manager) ListOpenPositions(ctx context.Context) ([]exchange.Position, error) {
-	if m.posRepo == nil {
+	if m == nil || m.posRepo == nil {
 		return nil, nil
 	}
 	recs, err := m.posRepo.ListActivePositions(ctx, 100)

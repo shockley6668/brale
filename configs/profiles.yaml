@@ -21,6 +21,7 @@ profiles:
     targets: ["ETH/USDT"]                   # 交易对列表（建议大写；支持多个）
     intervals: ["15m", "1h", "4h"]          # 订阅的 K 线周期（将汇总给模型）
     decision_interval_multiple: 2           # 决策调度：最短周期 * 倍数（UTC 对齐）；例如最短 15m，倍数 4 => 每 1h 决策一次
+    decision_run_immediately: true          # 修改为 true 以便测试时立即调用 AI
     analysis_slice: 100                    # 每个周期截取最近 N 根 K 线参与图表生成
     slice_drop_tail: 1                      # 丢弃最新 N 根（避免最后一根未收线导致噪声）
     kline_windows:
@@ -61,6 +62,8 @@ profiles:
       # - system_by_model：按模型 id 指定 system prompt（同一个 profile 可对不同模型给不同 system prompt）
       user: "lauk.txt"                     # User prompt：细化 exit_plan 约束
       system_by_model:
+        gemini-local: "default.txt"
+        github-gpt4o: "default.txt"
         qwen: "system-structure.txt"     # key 为 ai.models[].id
         gemini: "system-mechanics.txt"
         chatgpt: "system-indicator.txt"
