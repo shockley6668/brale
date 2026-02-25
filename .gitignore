@@ -8,7 +8,13 @@ desc.org
 
 config.yaml
 configs/config.yaml
+configs/profiles.yaml
 configs/user_data/freqtrade-config.json
+data/freqtrade_data/config.json
+data/logs/
+*.db
+*.db-shm
+*.db-wal
 
 *_test
 *_test.go
