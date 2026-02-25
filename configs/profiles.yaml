@@ -64,6 +64,7 @@ profiles:
       system_by_model:
         gemini-local: "default.txt"
         github-gpt4o: "default.txt"
+        deepseek: "system-structure.txt"
         qwen: "system-structure.txt"     # key 为 ai.models[].id
         gemini: "system-mechanics.txt"
         chatgpt: "system-indicator.txt"
