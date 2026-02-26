@@ -308,12 +308,17 @@ func buildPriceLines(entryPrice, rrVal float64, validateIv string) []string {
 }
 
 func buildTradeLines(d decision.Decision) []string {
-	lines := make([]string, 0, 4)
+	lines := make([]string, 0, 5)
 	if d.Leverage > 0 {
 		lines = append(lines, fmt.Sprintf("杠杆 %dx", d.Leverage))
 	}
 	if d.PositionSizeUSD > 0 {
-		lines = append(lines, fmt.Sprintf("仓位 %.0f USDT", d.PositionSizeUSD))
+		if d.Leverage > 0 {
+			margin := d.PositionSizeUSD / float64(d.Leverage)
+			lines = append(lines, fmt.Sprintf("保证金 %.0f USDT · 名义仓位 %.0f USDT", margin, d.PositionSizeUSD))
+		} else {
+			lines = append(lines, fmt.Sprintf("仓位 %.0f USDT", d.PositionSizeUSD))
+		}
 	}
 	if d.Confidence > 0 {
 		lines = append(lines, fmt.Sprintf("模型信心 %d%%", d.Confidence))

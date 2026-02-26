@@ -186,6 +186,10 @@
                                             <span class="pos-status" :class="statusBadgeClass(p.status)">[[ statusLabel(p.status) ]]</span>
                                         </div>
                                         <div class="pos-meta">[[ (p.side || '').toUpperCase() ]] · x[[ p.leverage ]]</div>
+                                        <div class="pos-sub mt-1" v-if="p.stake_amount > 0">
+                                            保证金 <strong>[[ formatUSD(p.stake_amount) ]]</strong>
+                                            <span v-if="p.leverage > 0"> · 名义 <strong>[[ formatUSD(p.stake_amount * p.leverage) ]]</strong></span>
+                                        </div>
                                         <div class="pos-sub mt-2">Entry [[ formatNumber(p.entry_price) ]]</div>
                                     </div>
                                     <div class="text-right">
@@ -1179,13 +1183,13 @@
     <script>
         window.__APP_INIT__ = {
             view: "{{ if .InitialView }}{{ .InitialView }}{{ else }}desk{{ end }}",
-            decisionId: {{ if .DecisionID }}{{ .DecisionID }}{{ else }}null{{ end }},
-        traceId: {{ if .TraceID }}{{ printf "%q" .TraceID }}{{ else }}null{{ end }},
-        tradeId: {{ if .TradeID }}{{ .TradeID }}{{ else }}null{{ end }},
-        symbol: {{ if .Symbol }}{{ printf "%q" .Symbol }}{{ else }}""{{ end }},
-        selectedSymbols: {{ if .SelectedSymbols }}{{ toJSON .SelectedSymbols }}{{ else }}[]{{ end }},
-        defaultSymbols: {{ toJSON .DefaultSymbols }},
-        symbolDetails: {{ toJSON .SymbolDetails }},
+            decisionId: {{ if .DecisionID }}{ { .DecisionID } } { { else } } null{ { end } },
+        traceId: { { if .TraceID } } { { printf "%q".TraceID } } { { else } } null{ { end } },
+        tradeId: { { if .TradeID } } { { .TradeID } } { { else } } null{ { end } },
+        symbol: { { if .Symbol } } { { printf "%q".Symbol } } { { else } } ""{ { end } },
+        selectedSymbols: { { if .SelectedSymbols } } { { toJSON.SelectedSymbols } } { { else } } []{ { end } },
+        defaultSymbols: { { toJSON.DefaultSymbols } },
+        symbolDetails: { { toJSON.SymbolDetails } },
         };
     </script>
     <script src="/static/js/admin-app.js"></script>
