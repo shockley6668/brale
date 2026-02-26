@@ -327,9 +327,9 @@ func buildDecisionExampleJSON(symbol, planJSON string) string {
 	example := exampleStruct{
 		Symbol:          strings.ToUpper(symbol),
 		Action:          "open_long",
-		Reasoning:       "此处填入对当前 action 的判断，100 字以内。",
-		PositionSizeUSD: 1000,
-		Leverage:        3,
+		Reasoning:       "此处填入对当前 action 的判断（中文，100 字以内）。",
+		PositionSizeUSD: 60,
+		Leverage:        10,
 		ExitPlan:        plan,
 	}
 

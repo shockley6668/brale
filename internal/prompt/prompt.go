@@ -395,16 +395,18 @@ const decisionConstraintBase = `### 决策输出要求
 - action 为 open_long/open_short 时：字段不可缺省，止盈/止损仅通过 exit_plan 描述。
 - action 为 update_exit_plan：必须附带完整 exit_plan（根节点 + 全部组件），且仅能修改状态为 waiting/pending 的段位。
 - 无操作时输出 [{"symbol":"BTCUSDT","action":"hold","reasoning":"简明理由"}]。
+- position_size_usd 为保证金（实际占用 USDT），最大不超过 80。名义仓位 = position_size_usd × leverage。
+- reasoning 必须使用中文，100字以内，禁止输出英文或代码块。
 `
 
 const fullDecisionTemplate = `[
   {
     "symbol": "ETH/USDT",
     "action": "open_long",
-    "position_size_usd": 500,
-    "leverage": 3,
+    "position_size_usd": 60,
+    "leverage": 10,
     "confidence": 70,
-    "reasoning": "请在此说明触发理由，100字以内。",
+    "reasoning": "请在此说明触发理由（中文，100字以内）。",
     "exit_plan": %s
   }
 ]`
